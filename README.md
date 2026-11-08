@@ -28,7 +28,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.1.0`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.1.1`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -44,7 +44,7 @@ docker compose up -d
 
 ## 添加与登录账号
 
-在网页添加账号，点击该行“登录 agy”。使用上下选择和确认按钮操作官方 CLI 的登录菜单，打开 Google 官方授权页面；将页面显示的一次性授权码提交到当前行。Google 密码只在 Google 页面输入，授权码只交给当前管理会话启动的官方 CLI，不保存、不回显。完成后点击“结束登录并校验”，实际生成成功后才允许启用。
+在网页添加账号，点击该行“登录 agy”。使用上下选择和确认按钮操作官方 CLI 的登录菜单，打开 Google 官方授权页面；将页面显示的一次性授权码提交到当前行。Google 密码只在 Google 页面输入，授权码只交给当前管理会话启动的官方 CLI，不落盘，完整CLI日志仅当前管理会话可见。完成后点击“校验登录（实际调用）”，实际生成成功后才允许启用。
 
 登录过程最长10分钟、与模型任务互斥；可以取消。登录目录存放在 `/volume1/docker/agy-data/accounts/<账号ID>/home`，授权数据由 CLI 自己管理。退出/重启管理服务后需重新发起未完成的登录；已保存的 CLI 数据保留。网页登录桥接不保证官方 CLI 的 keyring 在无桌面环境可持久化，首次真实授权后必须重启再校验。
 
@@ -85,6 +85,6 @@ NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-prese
 
 ## 镜像发布与开发
 
-GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.0` 对应镜像 `0.1.0`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
+GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.1` 对应镜像 `0.1.1`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
 
 镜像首次发布后，GHCR包需设为Public才能匿名拉取（GitHub默认Private）；私有部署使用有read:packages权限的凭据登录GHCR。官方CLI归Google所有，本仓库不改变其条款或订阅限制。

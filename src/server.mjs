@@ -114,7 +114,10 @@ export async function createApplication(options = {}) {
       command: process.env.AGY_BIN || "agy",
       timeout: Number(process.env.TASK_TIMEOUT_SECONDS || 180) * 1000,
     });
-  const queue = new SerialQueue(Number(process.env.QUEUE_LIMIT || 32), Number(process.env.MAX_CONCURRENCY || 1));
+  const queue = new SerialQueue(
+    Number(process.env.QUEUE_LIMIT || 32),
+    Number(process.env.MAX_CONCURRENCY || 1),
+  );
   const auth = new Auth({
     password: options.password || process.env.ADMIN_PASSWORD,
     key: options.key || process.env.API_KEY,
@@ -134,63 +137,67 @@ export async function createApplication(options = {}) {
   };
   async function perform(params, signal) {
     const selected = store.pick(params.account, params.model).id;
-    return queue.add(async () => {
-      const a = store.pick(selected, params.model);
-      const started = Date.now(),
-        id = randomUUID();
-      a.requests++;
-      await store.save();
-      try {
-        const result = await runner.execute(a.id, {
-          prompt: params.prompt,
-          model: params.model,
-          signal,
-        });
-        a.successes++;
-        a.total_tokens += result.usage?.total_tokens || 0;
-        if (Number.isFinite(result.usage?.total_tokens))
-          a.token_reports = (a.token_reports || 0) + 1;
-        a.last_used = new Date().toISOString();
-        a.last_error = null;
-        await store.event({
-          id,
-          account_id: a.id,
-          account_name: a.name,
-          model: params.model || result.model || "默认模型",
-          status: 200,
-          duration_ms: Date.now() - started,
-          total_tokens: result.usage?.total_tokens ?? null,
-        });
-        return {
-          ...result,
-          request_id: id,
-          account: { id: a.id, name: a.name },
-        };
-      } catch (error) {
-        a.failures++;
-        a.last_error = error.code || "internal_error";
-        if (
-          error.code === "account_suspended" ||
-          error.code === "login_required"
-        ) {
-          a.enabled = false;
-          a.status = error.code;
+    return queue.add(
+      async () => {
+        const a = store.pick(selected, params.model);
+        const started = Date.now(),
+          id = randomUUID();
+        a.requests++;
+        await store.save();
+        try {
+          const result = await runner.execute(a.id, {
+            prompt: params.prompt,
+            model: params.model,
+            signal,
+          });
+          a.successes++;
+          a.total_tokens += result.usage?.total_tokens || 0;
+          if (Number.isFinite(result.usage?.total_tokens))
+            a.token_reports = (a.token_reports || 0) + 1;
+          a.last_used = new Date().toISOString();
+          a.last_error = null;
+          await store.event({
+            id,
+            account_id: a.id,
+            account_name: a.name,
+            model: params.model || result.model || "默认模型",
+            status: 200,
+            duration_ms: Date.now() - started,
+            total_tokens: result.usage?.total_tokens ?? null,
+          });
+          return {
+            ...result,
+            request_id: id,
+            account: { id: a.id, name: a.name },
+          };
+        } catch (error) {
+          a.failures++;
+          a.last_error = error.code || "internal_error";
+          if (
+            error.code === "account_suspended" ||
+            error.code === "login_required"
+          ) {
+            a.enabled = false;
+            a.status = error.code;
+          }
+          await store.event({
+            id,
+            account_id: a.id,
+            account_name: a.name,
+            model: params.model || "默认模型",
+            status: error.status || 500,
+            code: error.code || "internal_error",
+            duration_ms: Date.now() - started,
+          });
+          throw error;
         }
-        await store.event({
-          id,
-          account_id: a.id,
-          account_name: a.name,
-          model: params.model || "默认模型",
-          status: error.status || 500,
-          code: error.code || "internal_error",
-          duration_ms: Date.now() - started,
-        });
-        throw error;
-      }
-    }, signal, { key: selected });
+      },
+      signal,
+      { key: selected },
+    );
   }
   register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version: "0.1.0" }),
+    send(res, { status: "ok", version: "0.1.1" }),
   );
   for (const [path, name, type] of [
     ["/", "index.html", "text/html"],
@@ -211,19 +218,24 @@ export async function createApplication(options = {}) {
   register("GET", "/auth/session", "read", async ({ res, principal }) =>
     send(res, { authenticated: true, csrf: principal.csrf }),
   );
-  register("POST", "/auth/logout", "mutation", async ({ req, res, principal }) => {
-    if (loginManager.current?.owner === principal.token) loginManager.close();
-    auth.sessions.delete(principal.token);
-    res.setHeader(
-      "set-cookie",
-      "agy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" +
-        (auth.sameOrigin(req).protocol === "https:" ? "; Secure" : ""),
-    );
-    send(res, { success: true });
-  });
+  register(
+    "POST",
+    "/auth/logout",
+    "mutation",
+    async ({ req, res, principal }) => {
+      if (loginManager.current?.owner === principal.token) loginManager.close();
+      auth.sessions.delete(principal.token);
+      res.setHeader(
+        "set-cookie",
+        "agy_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" +
+          (auth.sameOrigin(req).protocol === "https:" ? "; Secure" : ""),
+      );
+      send(res, { success: true });
+    },
+  );
   register("GET", "/api/status", "read", async ({ res }) =>
     send(res, {
-      version: "0.1.0",
+      version: "0.1.1",
       queue: queue.status,
       memory: {
         gateway_rss: process.memoryUsage().rss,
@@ -254,81 +266,126 @@ export async function createApplication(options = {}) {
       send(res, { success: true, profile_preserved: true });
     },
   );
-  register("POST", /^\/api\/accounts\/(a_[a-f0-9]{16})\/login$/, "mutation", async ({ res, match, principal }) => send(res, loginManager.start(principal.token, match[1])));
-  register("GET", /^\/api\/accounts\/(a_[a-f0-9]{16})\/login$/, "read", async ({ res, match, principal }) => send(res, loginManager.view(principal.token, match[1])));
-  register("POST", /^\/api\/accounts\/(a_[a-f0-9]{16})\/login-input$/, "mutation", async ({ req, res, match, principal }) => send(res, loginManager.input(principal.token, match[1], await body(req))));
-  register("POST", /^\/api\/accounts\/(a_[a-f0-9]{16})\/login-stop$/, "mutation", async ({ res, match, principal }) => send(res, loginManager.stop(principal.token, match[1])));
+  register(
+    "POST",
+    /^\/api\/accounts\/(a_[a-f0-9]{16})\/login$/,
+    "mutation",
+    async ({ res, match, principal }) =>
+      send(res, loginManager.start(principal.token, match[1])),
+  );
+  register(
+    "GET",
+    /^\/api\/accounts\/(a_[a-f0-9]{16})\/login$/,
+    "read",
+    async ({ res, match, principal }) =>
+      send(res, loginManager.view(principal.token, match[1])),
+  );
+  register(
+    "POST",
+    /^\/api\/accounts\/(a_[a-f0-9]{16})\/login-input$/,
+    "mutation",
+    async ({ req, res, match, principal }) =>
+      send(res, loginManager.input(principal.token, match[1], await body(req))),
+  );
+  register(
+    "POST",
+    /^\/api\/accounts\/(a_[a-f0-9]{16})\/login-stop$/,
+    "mutation",
+    async ({ res, match, principal }) =>
+      send(res, loginManager.stop(principal.token, match[1])),
+  );
+  async function verifyAccount(id, signal, onOutput) {
+    const a = store.get(id);
+    let testStarted = null,
+      testModel = "";
+    try {
+      const result = await runner.execute(a.id, {
+        probe: true,
+        signal,
+        onOutput,
+      });
+      a.models = result.models;
+      const candidates = a.models.filter(
+        (m) => !/image|tts|audio|video|embedding/i.test(m.id),
+      );
+      const selected =
+        candidates.find((m) => /flash/i.test(m.id)) || candidates[0];
+      if (!selected) throw new AppError(503, "没有可用于验证的文本模型");
+      testStarted = Date.now();
+      testModel = selected.id;
+      a.requests++;
+      const tested = await runner.execute(a.id, {
+        prompt: "Reply with exactly OK. Do not use tools.",
+        model: selected.id,
+        signal,
+        onOutput,
+      });
+      a.successes++;
+      a.total_tokens += tested.usage.total_tokens || 0;
+      if (Number.isFinite(tested.usage.total_tokens))
+        a.token_reports = (a.token_reports || 0) + 1;
+      a.last_used = new Date().toISOString();
+      await store.event({
+        id: randomUUID(),
+        account_id: a.id,
+        account_name: a.name,
+        model: selected.id,
+        status: 200,
+        kind: "verification",
+        duration_ms: Date.now() - testStarted,
+        total_tokens: tested.usage.total_tokens ?? null,
+      });
+      a.status = "ready";
+      a.last_error = null;
+      a.checked_at = new Date().toISOString();
+      await store.save();
+    } catch (e) {
+      a.last_error = e.code || "verification_failed";
+      a.enabled = false;
+      a.status = a.last_error;
+      a.checked_at = null;
+      if (testStarted) {
+        a.failures++;
+        await store.event({
+          id: randomUUID(),
+          account_id: a.id,
+          account_name: a.name,
+          model: testModel,
+          status: e.status || 500,
+          code: a.last_error,
+          kind: "verification",
+          duration_ms: Date.now() - testStarted,
+        });
+      } else await store.save();
+      throw e;
+    }
+    return a;
+  }
   register(
     "POST",
     /^\/api\/accounts\/(a_[a-f0-9]{16})\/verify$/,
     "mutation",
     async ({ res, match, signal }) => {
-      let a;
-      let testStarted = null,
-        testModel = "";
-      await queue.add(async () => {
-        a = store.get(match[1]);
-          try {
-          const result = await runner.execute(a.id, { probe: true, signal });
-          a.models = result.models;
-          const candidates = a.models.filter(
-            (m) => !/image|tts|audio|video|embedding/i.test(m.id),
-          );
-          const selected =
-            candidates.find((m) => /flash/i.test(m.id)) || candidates[0];
-          if (!selected) throw new AppError(503, "没有可用于验证的文本模型");
-          testStarted = Date.now();
-          testModel = selected.id;
-          a.requests++;
-          const tested = await runner.execute(a.id, {
-            prompt: "Reply with exactly OK. Do not use tools.",
-            model: selected.id,
-            signal,
-          });
-          a.successes++;
-          a.total_tokens += tested.usage.total_tokens || 0;
-          if (Number.isFinite(tested.usage.total_tokens))
-            a.token_reports = (a.token_reports || 0) + 1;
-          a.last_used = new Date().toISOString();
-          await store.event({
-            id: randomUUID(),
-            account_id: a.id,
-            account_name: a.name,
-            model: selected.id,
-            status: 200,
-            kind: "verification",
-            duration_ms: Date.now() - testStarted,
-            total_tokens: tested.usage.total_tokens ?? null,
-          });
-          a.status = "ready";
-          a.last_error = null;
-          a.checked_at = new Date().toISOString();
-          await store.save();
-        } catch (e) {
-          a.last_error = e.code || "verification_failed";
-          a.enabled = false;
-          a.status = a.last_error;
-          a.checked_at = null;
-          if (testStarted) {
-            a.failures++;
-            await store.event({
-              id: randomUUID(),
-              account_id: a.id,
-              account_name: a.name,
-              model: testModel,
-              status: e.status || 500,
-              code: a.last_error,
-              kind: "verification",
-              duration_ms: Date.now() - testStarted,
-            });
-          } else await store.save();
-          throw e;
-        }
-      }, signal, { key: match[1] });
+      const a = await queue.add(() => verifyAccount(match[1], signal), signal, {
+        key: match[1],
+      });
       send(res, {
         account: { ...a },
         note: "官方模型目录与实际生成均验证通过",
       });
+    },
+  );
+  register(
+    "POST",
+    /^\/api\/accounts\/(a_[a-f0-9]{16})\/login-finish$/,
+    "mutation",
+    async ({ res, match, principal, signal }) => {
+      const a = await loginManager.finish(
+        principal.token,
+        match[1],
+        (onOutput) => verifyAccount(match[1], signal, onOutput),
+      );
+      send(res, { account: { ...a }, note: "登录与实际生成均验证通过" });
     },
   );
   register("POST", "/api/tasks", "mutation", async ({ req, res, signal }) =>
@@ -507,7 +564,9 @@ if (
     app.loginManager.close();
     app.server.close();
     for (const pid of app.runner.activePids) {
-      try { process.kill(process.platform !== "win32" ? -pid : pid, "SIGKILL"); } catch {}
+      try {
+        process.kill(process.platform !== "win32" ? -pid : pid, "SIGKILL");
+      } catch {}
     }
     app.store.pending.finally(() => process.exit(0));
   };

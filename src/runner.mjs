@@ -51,7 +51,10 @@ export class Runner {
     Object.assign(this, { dataDir, command, prefix, timeout, outputLimit });
     this.activePids = new Set();
   }
-  async execute(id, { prompt, model = "", probe = false, signal } = {}) {
+  async execute(
+    id,
+    { prompt, model = "", probe = false, signal, onOutput } = {},
+  ) {
     modelId(model);
     const profile = await profilePaths(this.dataDir, id);
     const work = join(this.dataDir, "work", randomUUID());
@@ -72,6 +75,7 @@ export class Runner {
     const env = Object.fromEntries(
       allowed.filter((k) => process.env[k]).map((k) => [k, process.env[k]]),
     );
+    env.HTTPS_PROXY ||= env.HTTP_PROXY;
     Object.assign(env, profile.env, {
       LANG: "C.UTF-8",
       NO_COLOR: "1",
@@ -135,8 +139,11 @@ export class Runner {
             kill();
             return;
           }
-          if (type === "out") stdout += outDecoder.write(part);
-          else stderr += errDecoder.write(part);
+          const value =
+            type === "out" ? outDecoder.write(part) : errDecoder.write(part);
+          onOutput?.(value);
+          if (type === "out") stdout += value;
+          else stderr += value;
         };
         child.stdout.on("data", (p) => collect(p, "out"));
         child.stderr.on("data", (p) => collect(p, "err"));
@@ -238,11 +245,21 @@ export class Runner {
       await rm(work, { recursive: true, force: true });
     }
   }
-  get activePid() { return this.activePids.values().next().value || null; }
+  get activePid() {
+    return this.activePids.values().next().value || null;
+  }
   async memory() {
     if (process.platform !== "linux" || !this.activePids.size) return null;
-    const values = await Promise.all([...this.activePids].map(async pid => {
-      try { const s=await readFile("/proc/"+pid+"/status","utf8");return Number(s.match(/^VmRSS:\s+(\d+)/m)?.[1])*1024||0; } catch { return 0; }
-    }));return values.reduce((a,b)=>a+b,0)||null;
+    const values = await Promise.all(
+      [...this.activePids].map(async (pid) => {
+        try {
+          const s = await readFile("/proc/" + pid + "/status", "utf8");
+          return Number(s.match(/^VmRSS:\s+(\d+)/m)?.[1]) * 1024 || 0;
+        } catch {
+          return 0;
+        }
+      }),
+    );
+    return values.reduce((a, b) => a + b, 0) || null;
   }
 }

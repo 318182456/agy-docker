@@ -91,28 +91,143 @@ function renderAccounts() {
       bar.append(b);
     };
     button("登录 agy", async () => {
-      await api("/api/accounts/" + a.id + "/login", { method: "POST", data: {} });
+      await api("/api/accounts/" + a.id + "/login", {
+        method: "POST",
+        data: {},
+      });
+      loginPanels.delete(a.id);
       const cell = feedbackRow(a.id, "登录官方 agy");
       loginPanels.set(a.id, cell);
-      cell.append(text("p", "使用下方按钮选择 Google OAuth 并确认，然后打开官方授权页面；将官方显示的一次性授权码粘贴回来。Google 密码只在 Google 页面输入。"));
+      cell.append(
+        text(
+          "p",
+          "使用下方按钮选择 Google OAuth 并确认，然后打开官方授权页面；将官方显示的一次性授权码粘贴回来。Google 密码只在 Google 页面输入。",
+        ),
+      );
       const terminal = text("pre", "正在启动官方登录…", "login-terminal");
       terminal.setAttribute("aria-label", "官方 agy 登录状态");
       const status = text("p", "", "feedback");
       const link = text("a", "打开 Google 官方授权页面", "button-link");
-      link.target = "_blank"; link.rel = "noopener noreferrer"; link.hidden = true;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.hidden = true;
       const controls = text("div", "", "row-actions");
-      for (const [label,key] of [["上一个","up"],["下一个","down"],["确认选择","enter"]]) {
-        const b=text("button",label,"secondary");b.onclick=async()=>{try{await api("/api/accounts/"+a.id+"/login-input",{method:"POST",data:{key}});await poll();}catch(e){status.textContent=e.message;}};controls.append(b);
+      for (const [label, key] of [
+        ["上一个", "up"],
+        ["下一个", "down"],
+        ["确认选择", "enter"],
+      ]) {
+        const b = text("button", label, "secondary");
+        b.onclick = async () => {
+          try {
+            await api("/api/accounts/" + a.id + "/login-input", {
+              method: "POST",
+              data: { key },
+            });
+            await poll();
+          } catch (e) {
+            status.textContent = e.message;
+          }
+        };
+        controls.append(b);
       }
-      const form=document.createElement("form");form.className="inline-form";
-      const input=document.createElement("input");input.type="password";input.autocomplete="off";input.placeholder="粘贴 Google 显示的授权码";input.setAttribute("aria-label","Google 一次性授权码");input.maxLength=2048;
-      const submit=text("button","提交授权码");form.append(input,submit);
-      form.onsubmit=async e=>{e.preventDefault();const code=input.value.trim();input.value="";submit.disabled=true;try{await api("/api/accounts/"+a.id+"/login-input",{method:"POST",data:{code}});await poll();}catch(err){status.textContent=err.message;submit.disabled=false;}};
-      const end=text("button","结束登录并校验","secondary"),cancel=text("button","取消登录","secondary");
-      const finish=async verify=>{try{await api("/api/accounts/"+a.id+"/login-stop",{method:"POST",data:{}});loginPanels.delete(a.id);input.value="";if(verify){status.textContent="正在实际校验（消耗额度）…";await api("/api/accounts/"+a.id+"/verify",{method:"POST",data:{}});}expanded.delete(a.id);await refresh();if(verify)feedbackRow(a.id,"实际调用验证通过，可以启用账号。");}catch(e){status.textContent=e.message;}};
-      end.onclick=()=>finish(true);cancel.onclick=()=>finish(false);
-      cell.append(terminal,controls,link,form,status,end,cancel);
-      const poll=async()=>{if(loginPanels.get(a.id)!==cell)return;try{const value=await api("/api/accounts/"+a.id+"/login");terminal.textContent=value.text||"正在启动官方登录…";link.hidden=!value.url;if(value.url)link.href=value.url;form.hidden=!value.url&&value.state!=="submitted";if(value.state==="submitted"){submit.disabled=true;controls.hidden=true;status.textContent="授权码已提交，请等待几秒后点击“结束登录并校验”。";}if(["starting","running","submitted"].includes(value.state))setTimeout(poll,1500);else status.textContent="登录进程已结束，请校验账号；未完成授权时可重新登录。";}catch(e){status.textContent=e.message;}};
+      const form = document.createElement("form");
+      form.className = "inline-form";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.autocomplete = "off";
+      input.placeholder = "粘贴 Google 显示的授权码";
+      input.setAttribute("aria-label", "Google 一次性授权码");
+      input.maxLength = 2048;
+      const submit = text("button", "提交授权码");
+      form.append(input, submit);
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const code = input.value.trim();
+        input.value = "";
+        submit.disabled = true;
+        try {
+          await api("/api/accounts/" + a.id + "/login-input", {
+            method: "POST",
+            data: { code },
+          });
+          await poll();
+        } catch (err) {
+          status.textContent = err.message;
+          submit.disabled = false;
+        }
+      };
+      let pollTimer;
+      const end = text("button", "校验登录（实际调用）", "secondary"),
+        cancel = text("button", "取消登录", "secondary");
+      const finish = async (verify) => {
+        end.disabled = true;
+        try {
+          if (verify) {
+            status.textContent = "正在校验已保存的登录状态与实际生成…";
+            await api("/api/accounts/" + a.id + "/login-finish", {
+              method: "POST",
+              data: {},
+            });
+          } else
+            await api("/api/accounts/" + a.id + "/login-stop", {
+              method: "POST",
+              data: {},
+            });
+          input.value = "";
+          await poll();
+          await refresh();
+          status.textContent = verify
+            ? "登录与实际调用通过，可以启用账号。"
+            : "登录已取消，完整日志保留在此处。";
+        } catch (e) {
+          await poll().catch(() => {});
+          status.textContent = e.message;
+        } finally {
+          end.disabled = false;
+        }
+      };
+      end.onclick = () => finish(true);
+      cancel.onclick = () => finish(false);
+      cell.append(terminal, controls, link, form, status, end, cancel);
+      const poll = async () => {
+        clearTimeout(pollTimer);
+        if (loginPanels.get(a.id) !== cell) return;
+        try {
+          const value = await api("/api/accounts/" + a.id + "/login");
+          const follow =
+            terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight <
+            32;
+          terminal.textContent = value.text || "正在启动官方登录…";
+          if (follow) terminal.scrollTop = terminal.scrollHeight;
+          link.hidden = !value.url;
+          if (value.url) link.href = value.url;
+          form.hidden = !value.url && value.state !== "submitted";
+          end.disabled = value.state === "checking";
+          if (["submitted", "checking", "verified"].includes(value.state)) {
+            submit.disabled = true;
+            controls.hidden = true;
+          }
+          if (value.state === "submitted")
+            status.textContent =
+              "授权码已提交；下方完整日志会继续更新。完成登录后点击“校验登录（实际调用）”。";
+          if (value.state === "checking")
+            status.textContent = "正在验证持久化登录与真实生成，请等待…";
+          if (value.state === "verified")
+            status.textContent = "登录与实际调用已通过，可以启用账号。";
+          if (
+            ["starting", "running", "submitted", "checking"].includes(
+              value.state,
+            )
+          )
+            pollTimer = setTimeout(poll, 1500);
+          else if (value.state !== "verified")
+            status.textContent =
+              "登录进程已结束；完整日志和退出状态保留在此处。";
+        } catch (e) {
+          status.textContent = e.message;
+        }
+      };
       await poll();
     });
     button("校验并测试", async () => {
@@ -180,7 +295,11 @@ function renderAccounts() {
       detail.className = "nearby";
       const cell = document.createElement("td");
       cell.colSpan = 5;
-      if (loginPanels.has(a.id)) { detail.append(loginPanels.get(a.id)); rows.append(detail); continue; }
+      if (loginPanels.has(a.id)) {
+        detail.append(loginPanels.get(a.id));
+        rows.append(detail);
+        continue;
+      }
       cell.append(text("strong", expanded.get(a.id)));
       detail.append(cell);
       rows.append(detail);

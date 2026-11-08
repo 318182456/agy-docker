@@ -1,7 +1,7 @@
 name: agy-docker
 services:
   app:
-    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.1.0}
+    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.1.1}
     hostname: agy-docker
     init: true
     restart: unless-stopped
@@ -14,6 +14,7 @@ services:
       NO_PROXY: ${NO_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-${HTTP_PROXY:-}}
     volumes:
       - ${DATA_PATH:-/volume1/docker/agy-data}:/data
     read_only: true
