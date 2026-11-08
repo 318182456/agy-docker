@@ -34,8 +34,8 @@ export function loginDisplay(raw) {
   return { url, text: plain };
 }
 export class LoginManager {
-  constructor({ dataDir, queue, store, launch = spawn }) {
-    Object.assign(this, { dataDir, queue, store, launch });
+  constructor({ dataDir, queue, store, keyrings = null, launch = spawn }) {
+    Object.assign(this, { dataDir, queue, store, keyrings, launch });
     this.current = null;
   }
   view(owner, id) {
@@ -76,10 +76,11 @@ export class LoginManager {
     this.queue
       .add(
         async () => {
-          let timer;
+          let timer, keyring;
           try {
             const p = await profilePaths(this.dataDir, id);
             if (!activeStates.has(s.state)) return;
+            keyring = await this.keyrings?.acquire(id, p);
             const allowed = [
               "PATH",
               "HTTP_PROXY",
@@ -94,7 +95,7 @@ export class LoginManager {
                 .map((k) => [k, process.env[k]]),
             );
             env.HTTPS_PROXY ||= env.HTTP_PROXY;
-            Object.assign(env, p.env, {
+            Object.assign(env, p.env, keyring?.env, {
               TERM: "xterm-256color",
               LANG: "C.UTF-8",
               SSH_CONNECTION: "127.0.0.1 1 127.0.0.1 22",
@@ -152,6 +153,7 @@ export class LoginManager {
           } finally {
             clearTimeout(timer);
             s.child = null;
+            await keyring?.release();
           }
         },
         undefined,

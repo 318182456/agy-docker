@@ -1,3 +1,4 @@
+import { Keyrings } from "./keyrings.mjs";
 import { StringDecoder } from "node:string_decoder";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
@@ -50,6 +51,8 @@ export class Runner {
   }) {
     Object.assign(this, { dataDir, command, prefix, timeout, outputLimit });
     this.activePids = new Set();
+    this.keyrings =
+      process.platform === "linux" && command === "agy" ? new Keyrings() : null;
   }
   async execute(
     id,
@@ -94,7 +97,10 @@ export class Runner {
           "--disable-slash-commands",
           ...(model ? ["--model", model] : []),
         ];
+    let keyring;
     try {
+      keyring = await this.keyrings?.acquire(id, profile);
+      if (keyring) Object.assign(env, keyring.env);
       return await new Promise((resolve, reject) => {
         if (signal?.aborted) {
           reject(new AppError(499, "请求已取消", "cancelled"));
@@ -242,6 +248,7 @@ export class Runner {
           );
       });
     } finally {
+      await keyring?.release();
       await rm(work, { recursive: true, force: true });
     }
   }

@@ -122,7 +122,12 @@ export async function createApplication(options = {}) {
     password: options.password || process.env.ADMIN_PASSWORD,
     key: options.key || process.env.API_KEY,
   });
-  const loginManager = new LoginManager({ dataDir, queue, store });
+  const loginManager = new LoginManager({
+    dataDir,
+    queue,
+    store,
+    keyrings: runner.keyrings,
+  });
   const routes = [];
   function register(method, path, access, handler) {
     if (!["public", "read", "mutation", "api"].includes(access))
@@ -197,7 +202,7 @@ export async function createApplication(options = {}) {
     );
   }
   register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version: "0.1.1" }),
+    send(res, { status: "ok", version: "0.1.2" }),
   );
   for (const [path, name, type] of [
     ["/", "index.html", "text/html"],
@@ -235,7 +240,7 @@ export async function createApplication(options = {}) {
   );
   register("GET", "/api/status", "read", async ({ res }) =>
     send(res, {
-      version: "0.1.1",
+      version: "0.1.2",
       queue: queue.status,
       memory: {
         gateway_rss: process.memoryUsage().rss,
@@ -568,7 +573,9 @@ if (
         process.kill(process.platform !== "win32" ? -pid : pid, "SIGKILL");
       } catch {}
     }
-    app.store.pending.finally(() => process.exit(0));
+    Promise.all([app.store.pending, app.runner.keyrings?.close()]).finally(() =>
+      process.exit(0),
+    );
   };
   process.on("SIGTERM", close);
   process.on("SIGINT", close);
