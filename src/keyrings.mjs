@@ -119,8 +119,7 @@ export class Keyrings {
       "--control-directory=" + join(e.runtime, "keyring"),
     ]);
     daemon.stdin.on("error", () => {});
-    daemon.stdin.end(password);
-    password.fill(0);
+    daemon.stdin.end(password, () => password.fill(0));
     for (let i = 0; i < 50; i++) {
       if (daemon.launchError || daemon.exitCode !== null) break;
       const ok = await new Promise((resolve) => {

@@ -1,7 +1,7 @@
 name: agy-docker
 services:
   app:
-    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.1.2}
+    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.1.3}
     hostname: agy-docker
     init: true
     restart: unless-stopped
