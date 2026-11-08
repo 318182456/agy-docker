@@ -5,7 +5,7 @@ const content =
   randomBytes(32).toString("base64url") +
   "\nAPI_KEY=" +
   randomBytes(32).toString("base64url") +
-  "\nTASK_TIMEOUT_SECONDS=180\nQUEUE_LIMIT=32\nIMAGE_TAG=0.1.3\nDATA_PATH=/volume1/docker/agy-data\nMAX_CONCURRENCY=1\nTRAEFIK_SUBDOMAIN=agy-docker\nTRAEFIK_CONTAINER_PORT=18861\n";
+  "\nTASK_TIMEOUT_SECONDS=180\nQUEUE_LIMIT=32\nIMAGE_TAG=0.1.4\nDATA_PATH=/volume1/docker/agy-data\nMAX_CONCURRENCY=1\nTRAEFIK_SUBDOMAIN=agy-docker\nTRAEFIK_CONTAINER_PORT=18861\n";
 try {
   await writeFile(".env", content, { flag: "wx", mode: 0o600 });
   console.log(

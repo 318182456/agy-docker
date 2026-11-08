@@ -122,27 +122,44 @@ export class Keyrings {
     daemon.stdin.end(password, () => password.fill(0));
     for (let i = 0; i < 50; i++) {
       if (daemon.launchError || daemon.exitCode !== null) break;
-      const ok = await new Promise((resolve) => {
-        const ping = spawn(
-          "dbus-send",
-          [
-            "--session",
-            "--print-reply",
-            "--reply-timeout=300",
-            "--dest=org.freedesktop.secrets",
-            "/org/freedesktop/secrets",
-            "org.freedesktop.DBus.Peer.Ping",
-          ],
-          { env, stdio: "ignore" },
-        );
-        ping.once("error", () => resolve(false));
-        ping.once("close", (code) => resolve(code === 0));
-      });
-      if (ok)
-        return {
-          DBUS_SESSION_BUS_ADDRESS: address,
-          XDG_RUNTIME_DIR: e.runtime,
-        };
+      const call = async (args) =>
+        new Promise((resolve) => {
+          const child = spawn(
+            "dbus-send",
+            [
+              "--session",
+              "--print-reply",
+              "--reply-timeout=500",
+              "--dest=org.freedesktop.secrets",
+              ...args,
+            ],
+            { env, stdio: ["ignore", "pipe", "ignore"] },
+          );
+          let output = "";
+          child.stdout.on("data", (b) => (output += b));
+          child.once("error", () => resolve({ code: 1, output: "" }));
+          child.once("close", (code) => resolve({ code, output }));
+        });
+      // Secret Service can answer Ping before the login collection is unlocked.
+      const unlocked = await call([
+        "/org/freedesktop/secrets/collection/login",
+        "org.freedesktop.DBus.Properties.Get",
+        "string:org.freedesktop.Secret.Collection",
+        "string:Locked",
+      ]);
+      if (unlocked.code === 0 && /boolean false/.test(unlocked.output)) {
+        const alias = await call([
+          "/org/freedesktop/secrets",
+          "org.freedesktop.Secret.Service.SetAlias",
+          "string:default",
+          "objpath:/org/freedesktop/secrets/collection/login",
+        ]);
+        if (alias.code === 0)
+          return {
+            DBUS_SESSION_BUS_ADDRESS: address,
+            XDG_RUNTIME_DIR: e.runtime,
+          };
+      }
       await delay(100);
     }
     throw new AppError(
