@@ -1,0 +1,43 @@
+# NAS 专用：继承 Dockhand 默认模板的共享入口与代理配置。
+name: agy-docker
+services:
+  app:
+    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.1.0}
+    hostname: agy-docker
+    extends:
+      file: /volume1/docker/all/compose-presets.yml
+      service: web-model-api
+    networks:
+      - postgres-network
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-18861}:18861"
+    environment:
+      PORT: "18861"
+      DATA_DIR: /data
+      NO_PROXY: ${NO_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+    volumes:
+      - ${DATA_PATH:-/volume1/docker/agy-data}:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpu_shares: 512
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+networks:
+  postgres-network:
+    external: true
+    name: postgres-network

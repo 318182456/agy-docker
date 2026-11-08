@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SerialQueue } from '../src/queue.mjs';
+import { LoginManager, loginDisplay } from '../src/login.mjs';
+import { Store } from '../src/store.mjs';
+const tick=()=>new Promise(r=>setTimeout(r,15));
+test('configured concurrency preserves account serialization and exclusive login barriers',async()=>{
+ const q=new SerialQueue(10,2),log=[],gates={};
+ const run=(id,key,exclusive=false)=>q.add(async()=>{log.push(id);await new Promise(r=>gates[id]=r);},undefined,{key,exclusive});
+ const a=run('a','one'),a2=run('a2','one'),b=run('b','two'),login=run('login','three',true),c=run('c','four');
+ await tick();assert.deepEqual(log,['a','b']);assert.equal(q.status.running,2);gates.b();await b;assert.deepEqual(log,['a','b']);gates.a();await a;await tick();assert.deepEqual(log,['a','b','a2']);gates.a2();await a2;await tick();assert.equal(log.at(-1),'login');assert.equal(q.status.running,1);gates.login();await login;await tick();assert.equal(log.at(-1),'c');gates.c();await c;assert.equal(q.status.running,0);
+ assert.throws(()=>new SerialQueue(32,0));assert.throws(()=>new SerialQueue(32,17));
+});
+test('login parser uses full official OSC link and rejects untrusted destinations',()=>{
+ const url='https://accounts.google.com/o/oauth2/auth?state=synthetic-long-value';
+ const value=loginDisplay('\x1b]8;;'+url+'\x07https://accounts.google.com/o/\x1b]8;;\x07');
+ assert.equal(value.url,url);assert.equal(value.text.includes('synthetic-long-value'),false);assert.equal(loginDisplay('https://evil.example/auth').url,null);assert.equal(loginDisplay('https://accounts.google.com.evil.example').url,null);
+});
+test('login code is one-shot, owner-bound, excluded from environment and never echoed or saved',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'agy-login-test-'));const store=await new Store(dir).init();const a=await store.create({name:'login'});const q=new SerialQueue(32,3);const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();let written='';child.stdin.on('data',b=>written+=b);let env;
+ const manager=new LoginManager({dataDir:dir,store,queue:q,launch:(command,args,options)=>{assert.equal(command,'/usr/bin/script');assert.deepEqual(args,['-q','-e','-c','/app/scripts/login-pty.sh','/dev/null']);env=options.env;return child;}});
+ try{manager.start('owner',a.id);for(let n=0;n<100&&!manager.current.child;n++)await tick();assert.equal(env.ADMIN_PASSWORD,undefined);assert.equal(env.API_KEY,undefined);assert.equal(q.exclusive,true);child.stdout.write('Authorize https://accounts.google.com/o/oauth2/auth?state=synthetic\n');assert.equal(manager.view('other',a.id).state,'idle');assert.throws(()=>manager.input('other',a.id,{code:'synthetic-code'}));assert.throws(()=>manager.input('owner',a.id,{code:'bad\ncommand'}));manager.input('owner',a.id,{code:'synthetic-code'});child.stdout.write('echo synthetic-code secret');assert.equal(written,'synthetic-code\r');assert.equal(manager.view('owner',a.id).text.includes('synthetic-code'),false);assert.equal(manager.view('owner',a.id).url,null);assert.throws(()=>manager.input('owner',a.id,{code:'synthetic-code'}));assert.equal((await readFile(join(dir,'state.json'),'utf8')).includes('synthetic-code'),false);manager.stop('owner',a.id);child.emit('close',0);await tick();assert.equal(q.running,0);}finally{manager.close();await rm(dir,{recursive:true,force:true});}
+});
