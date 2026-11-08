@@ -105,7 +105,7 @@ function renderAccounts() {
       cell.append(
         text(
           "p",
-          "使用下方按钮选择 Google OAuth 并确认，然后打开官方授权页面；将官方显示的一次性授权码粘贴回来。Google 密码只在 Google 页面输入。",
+          "先完成 Google 官方授权，再使用下方按钮完成主题、显示模式等首次设置。已有登录状态会直接进入设置；Google 密码只在 Google 页面输入。",
         ),
       );
       const terminal = text("pre", "正在启动官方登录…", "login-terminal");
@@ -119,9 +119,11 @@ function renderAccounts() {
       for (const [label, key] of [
         ["上一个", "up"],
         ["下一个", "down"],
-        ["确认选择", "enter"],
+        ["确认/下一步", "enter"],
+        ["切换焦点", "tab"],
       ]) {
         const b = text("button", label, "secondary");
+        b.type = "button";
         b.onclick = async () => {
           try {
             await api("/api/accounts/" + a.id + "/login-input", {
@@ -208,13 +210,13 @@ function renderAccounts() {
           if (value.url) link.href = value.url;
           form.hidden = !value.url && value.state !== "submitted";
           end.disabled = value.state === "checking";
+          controls.hidden = !["running", "submitted"].includes(value.state);
           if (["submitted", "checking", "verified"].includes(value.state)) {
             submit.disabled = true;
-            controls.hidden = true;
           }
           if (value.state === "submitted")
             status.textContent =
-              "授权码已提交；下方完整日志会继续更新。完成登录后点击“校验登录（实际调用）”。";
+              "授权码已提交。若日志出现主题、[Next] 等设置菜单，请用上下选择、确认/下一步继续；初始化完成后再校验登录。";
           if (value.state === "checking")
             status.textContent = "正在验证持久化登录与真实生成，请等待…";
           if (value.state === "verified")
@@ -322,7 +324,9 @@ function renderAccounts() {
   }
 }
 function render() {
-  $("versionBadge").textContent = state.version ? "v" + state.version : "AGY Docker";
+  $("versionBadge").textContent = state.version
+    ? "v" + state.version
+    : "AGY Docker";
   const enabled = state.accounts.filter((a) => a.enabled);
   $("readyCount").textContent = enabled.length + " / " + state.accounts.length;
   $("concurrencyLabel").textContent = "最大并发 " + state.queue.concurrency;
@@ -476,4 +480,3 @@ $("apiUrl").textContent = location.origin + "/v1";
     showLogin();
   }
 })();
-

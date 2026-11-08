@@ -174,8 +174,8 @@ export class LoginManager {
       !activeStates.has(s.state)
     )
       throw new AppError(409, "登录已结束，请重新发起");
-    const keys = { enter: "\r", up: "\x1b[A", down: "\x1b[B" };
-    if (value.key && keys[value.key] && !s.submitted)
+    const keys = { enter: "\r", up: "\x1b[A", down: "\x1b[B", tab: "\t" };
+    if (value.key && keys[value.key] && s.state !== "checking")
       s.child.stdin.write(keys[value.key]);
     else if (
       typeof value.code === "string" &&

@@ -118,6 +118,15 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
       true,
     );
     assert.equal(manager.view("owner", a.id).url, null);
+    manager.input("owner", a.id, { key: "down" });
+    manager.input("owner", a.id, { key: "enter" });
+    manager.input("owner", a.id, { key: "tab" });
+    assert.ok(written.endsWith("\x1b[B\r\t"));
+    assert.throws(() => manager.input("other", a.id, { key: "enter" }));
+    manager.current.state = "checking";
+    assert.throws(() => manager.input("owner", a.id, { key: "enter" }));
+    manager.current.state = "submitted";
+
     assert.throws(() =>
       manager.input("owner", a.id, { code: "synthetic-code" }),
     );
