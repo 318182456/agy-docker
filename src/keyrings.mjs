@@ -91,11 +91,18 @@ export class Keyrings {
       e.children.push(c);
       return c;
     };
+    // Private bus deliberately has no activation service directories: probing
+    // before our daemon owns its name must not auto-start a competing daemon.
+    const config = join(e.runtime, "session.conf");
+    await writeFile(
+      config,
+      `<busconfig><type>session</type><listen>${address}</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>`,
+      { mode: 0o600 },
+    );
     const bus = launch("dbus-daemon", [
-      "--session",
       "--nofork",
       "--nopidfile",
-      "--address=" + address,
+      "--config-file=" + config,
     ]);
     let ready = false;
     for (let i = 0; i < 60; i++) {
