@@ -28,7 +28,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.1.7`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.1.8`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -85,7 +85,7 @@ NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-prese
 
 ## 镜像发布与开发
 
-GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.7` 对应镜像 `0.1.7`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
+GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.8` 对应镜像 `0.1.8`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
 
 镜像首次发布后，GHCR包需设为Public才能匿名拉取（GitHub默认Private）；私有部署使用有read:packages权限的凭据登录GHCR。官方CLI归Google所有，本仓库不改变其条款或订阅限制。
 

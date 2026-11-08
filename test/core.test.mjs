@@ -142,3 +142,13 @@ test("round robin selects only accounts that report the requested model", () =>
       (e) => e.status === 400,
     );
   }));
+test("official model TSV and legacy aligned columns both produce usable model catalogs", () =>
+  temp(async (dir) => {
+    const result = await runner(dir).execute("a_1111111111111111", {
+      probe: true,
+    });
+    assert.deepEqual(result.models, [
+      { id: "gemini-test-medium", name: "Gemini Test (Medium)" },
+      { id: "gemini-other-high", name: "Gemini Other (High)" },
+    ]);
+  }));

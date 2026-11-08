@@ -3,7 +3,7 @@ import { join } from "node:path";
 const args = process.argv.slice(2);
 if (args[0] === "models") {
   console.log(
-    "gemini-test-medium  Gemini Test (Medium)\ngemini-other-high  Gemini Other (High)",
+    "gemini-test-medium\tGemini Test (Medium)\ngemini-other-high  Gemini Other (High)",
   );
   process.exit(0);
 }

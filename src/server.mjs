@@ -202,7 +202,7 @@ export async function createApplication(options = {}) {
     );
   }
   register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version: "0.1.7" }),
+    send(res, { status: "ok", version: "0.1.8" }),
   );
   for (const [path, name, type] of [
     ["/", "index.html", "text/html"],
@@ -240,7 +240,7 @@ export async function createApplication(options = {}) {
   );
   register("GET", "/api/status", "read", async ({ res }) =>
     send(res, {
-      version: "0.1.7",
+      version: "0.1.8",
       queue: queue.status,
       memory: {
         gateway_rss: process.memoryUsage().rss,
@@ -314,7 +314,13 @@ export async function createApplication(options = {}) {
         (m) => !/image|tts|audio|video|embedding/i.test(m.id),
       );
       const selected =
-        candidates.find((m) => /flash/i.test(m.id)) || candidates[0];
+        candidates.find(
+          (m) =>
+            /flash/i.test(m.id) &&
+            /(?:^|[-_.])(?:low|lite)(?:$|[-_.])/i.test(m.id),
+        ) ||
+        candidates.find((m) => /flash/i.test(m.id)) ||
+        candidates[0];
       if (!selected) throw new AppError(503, "没有可用于验证的文本模型");
       testStarted = Date.now();
       testModel = selected.id;
