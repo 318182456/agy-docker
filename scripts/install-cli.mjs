@@ -16,19 +16,38 @@ try {
   console.log("Using supplied official CLI archive");
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
-  const metadata = await fetch(url, {
-    headers: { accept: "application/octet-stream", "user-agent": "agy-docker" },
-    redirect: "manual",
-    signal: AbortSignal.timeout(15000),
-  });
-  const downloadUrl = metadata.headers.get("location");
-  await metadata.body?.cancel();
-  if (
-    metadata.status !== 302 ||
-    !downloadUrl ||
-    new URL(downloadUrl).hostname !== "release-assets.githubusercontent.com"
-  )
-    throw Error("Unexpected official download redirect");
+  const direct = `https://github.com/google-antigravity/antigravity-cli/releases/download/${version}/agy_cli_linux_${process.arch}.tar.gz`;
+  let downloadUrl, lastError;
+  for (let attempt = 0; attempt < 3 && !downloadUrl; attempt++) {
+    for (const endpoint of [direct, url]) {
+      try {
+        const metadata = await fetch(endpoint, {
+          headers: {
+            accept: "application/octet-stream",
+            "user-agent": "agy-docker",
+          },
+          redirect: "manual",
+          signal: AbortSignal.timeout(15000),
+        });
+        const location = metadata.headers.get("location");
+        await metadata.body?.cancel();
+        if (metadata.status !== 302 || !location)
+          throw Error("Official CLI endpoint HTTP " + metadata.status);
+        const target = new URL(location);
+        if (
+          target.protocol !== "https:" ||
+          target.hostname !== "release-assets.githubusercontent.com"
+        )
+          throw Error("Unexpected official asset host");
+        downloadUrl = target.href;
+        break;
+      } catch (error) {
+        lastError = error;
+        console.log(error.message);
+      }
+    }
+  }
+  if (!downloadUrl) throw lastError;
   const size = sizes[process.arch],
     count = 32,
     span = Math.ceil(size / count),
