@@ -322,6 +322,7 @@ function renderAccounts() {
   }
 }
 function render() {
+  $("versionBadge").textContent = state.version ? "v" + state.version : "AGY Docker";
   const enabled = state.accounts.filter((a) => a.enabled);
   $("readyCount").textContent = enabled.length + " / " + state.accounts.length;
   $("concurrencyLabel").textContent = "最大并发 " + state.queue.concurrency;
@@ -475,3 +476,4 @@ $("apiUrl").textContent = location.origin + "/v1";
     showLogin();
   }
 })();
+
