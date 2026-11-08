@@ -303,11 +303,59 @@ test("model directory success cannot enable an account when actual generation fa
 test("browser origins follow each request Host, reject spoofed forwarding, and set secure cookies for HTTPS", async () => {
   const { Auth } = await import("../src/auth.mjs");
   const auth = new Auth({ password, key });
-  const request = (origin,host,extra={}) => ({headers:{origin,host,...extra},socket:{remoteAddress:"test"}});
-  for (const [origin,host] of [["http://sa6400:18861","sa6400:18861"],["http://192.168.1.10:18861","192.168.1.10:18861"],["https://agy-docker.wangxy.host:8443","agy-docker.wangxy.host:8443"]]) {
-    const req=request(origin,host,{"sec-fetch-site":"same-origin"});
-    assert.doesNotThrow(()=>auth.sameOrigin(req));
-    assert.equal(auth.cookie("sample",req).includes("; Secure"),origin.startsWith("https:"));
+  const request = (origin, host, extra = {}) => ({
+    headers: { origin, host, ...extra },
+    socket: { remoteAddress: "test" },
+  });
+  for (const [origin, host] of [
+    ["http://sa6400:18861", "sa6400:18861"],
+    ["http://192.168.1.10:18861", "192.168.1.10:18861"],
+    ["https://agy-docker.wangxy.host:8443", "agy-docker.wangxy.host:8443"],
+  ]) {
+    const req = request(origin, host, { "sec-fetch-site": "same-origin" });
+    assert.doesNotThrow(() => auth.sameOrigin(req));
+    assert.equal(
+      auth.cookie("sample", req).includes("; Secure"),
+      origin.startsWith("https:"),
+    );
   }
-  for (const req of [request("https://evil.test","sa6400:18861"),request("null","sa6400:18861"),request("http://sa6400:18861","sa6400:18861",{"sec-fetch-site":"cross-site"}),request("https://evil.test","sa6400:18861",{"x-forwarded-host":"evil.test"})]) assert.throws(()=>auth.sameOrigin(req));
+  for (const req of [
+    request("https://evil.test", "sa6400:18861"),
+    request("null", "sa6400:18861"),
+    request("http://sa6400:18861", "sa6400:18861", {
+      "sec-fetch-site": "cross-site",
+    }),
+    request("https://evil.test", "sa6400:18861", {
+      "x-forwarded-host": "evil.test",
+    }),
+  ])
+    assert.throws(() => auth.sameOrigin(req));
 });
+test("provider authentication failures preserve the independent administrator session", () =>
+  appTest(async ({ app, call, login }) => {
+    const unauth = await call("/api/status", { session: false });
+    assert.equal(unauth.status, 401);
+    assert.equal((await unauth.json()).error.code, "admin_session_required");
+    await login();
+    const created = await call("/api/accounts", {
+        method: "POST",
+        data: { name: "auth boundary" },
+      }),
+      a = await created.json();
+    app.runner.execute = async (id, { probe }) => {
+      if (probe) return { models: [{ id: "gemini-test-flash" }] };
+      throw new AppError(
+        401,
+        "upstream authentication required",
+        "login_required",
+      );
+    };
+    const rejected = await call("/api/accounts/" + a.id + "/verify", {
+      method: "POST",
+      data: {},
+    });
+    assert.equal(rejected.status, 401);
+    assert.equal((await rejected.json()).error.code, "login_required");
+    assert.equal((await call("/auth/session")).status, 200);
+    assert.equal((await call("/api/status")).status, 200);
+  }));

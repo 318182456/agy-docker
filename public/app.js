@@ -26,7 +26,11 @@ async function api(path, { method = "GET", data, signal } = {}) {
   });
   const value = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== "/auth/login") showLogin();
+    if (
+      response.status === 401 &&
+      value.error?.code === "admin_session_required"
+    )
+      showLogin();
     throw Error(value.error?.message || "操作失败");
   }
   return value;

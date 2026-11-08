@@ -202,7 +202,7 @@ export async function createApplication(options = {}) {
     );
   }
   register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version: "0.1.5" }),
+    send(res, { status: "ok", version: "0.1.6" }),
   );
   for (const [path, name, type] of [
     ["/", "index.html", "text/html"],
@@ -240,7 +240,7 @@ export async function createApplication(options = {}) {
   );
   register("GET", "/api/status", "read", async ({ res }) =>
     send(res, {
-      version: "0.1.5",
+      version: "0.1.6",
       queue: queue.status,
       memory: {
         gateway_rss: process.memoryUsage().rss,

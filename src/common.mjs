@@ -49,7 +49,7 @@ export function classifyFailure(text) {
   )
     return new AppError(
       401,
-      "此账号尚未登录或登录已失效，请在终端完成官方登录",
+      "此账号尚未登录或授权尚未完成，请在当前账号的“登录 agy”详情中完成官方授权",
       "login_required",
     );
   if (/429|quota.exhaust|rate.limit|resource.exhaust/i.test(text))
