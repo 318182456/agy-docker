@@ -7,7 +7,7 @@ RUN --mount=type=bind,target=/build-context node /tmp/install-cli.mjs && tar -xz
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AGY Docker" \
       org.opencontainers.image.source="https://github.com/318182456/agy-docker" \
-      org.opencontainers.image.version="0.1.10"
+      org.opencontainers.image.version="0.1.11"
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts

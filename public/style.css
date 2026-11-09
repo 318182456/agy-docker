@@ -439,3 +439,10 @@ code {
 .login-terminal { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface, #fafafa); padding: 12px; font-size: 12px; }
 .button-link { display: inline-block; margin: 8px 0; color: #168063; }
 .nearby form { max-width: 640px; margin: 12px 0; }
+
+.model-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 230px); gap: 14px; margin: 14px 0; }
+#modelRows code { overflow-wrap: anywhere; }
+#modelRows td { vertical-align: top; }
+.login-details { margin: 8px 0; }
+.login-details summary { cursor: pointer; color: #526159; }
+@media(max-width: 640px) { .model-filters { grid-template-columns: 1fr; } }

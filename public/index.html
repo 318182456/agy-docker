@@ -14,7 +14,7 @@
           >A<span>AGY Docker<small>官方 CLI · 独立运行</small></span></a
         >
         <nav>
-          <a href="#accounts">账号管理</a><a href="#tasks">发送任务</a
+          <a href="#accounts">账号管理</a><a href="#models">支持模型</a><a href="#tasks">发送任务</a
           ><a href="#history">最近记录</a>
         </nav>
         <p class="sidebar-note">
@@ -72,7 +72,7 @@
               <div>
                 <h2>账号管理</h2>
                 <p class="muted">
-                  各账号独立保存登录状态；先完成终端登录，再校验测试后启用。
+                  各账号独立保存登录状态；网页授权和自动校验完成后即可启用。
                 </p>
               </div>
               <span class="badge">轮询分配</span>
@@ -104,6 +104,21 @@
             <p class="muted note">
               移除账号只移除管理记录，登录目录保留。“校验并测试”会读取模型目录并实际生成一次，消耗少量额度；仅成功后才标为可用。
             </p>
+          </section>
+          <section class="card" id="models">
+            <div class="section-heading">
+              <div><h2>支持模型</h2><p class="muted">来自各账号最近一次官方 CLI 校验，登录校验后自动更新。可用账号数只包含已启用且校验通过的账号。</p></div>
+              <span class="badge" id="modelCount">0 个模型</span>
+            </div>
+            <div class="model-filters">
+              <label>搜索模型<input id="modelSearch" type="search" placeholder="模型 ID 或名称" /></label>
+              <label>可用性<select id="modelAvailability"><option value="all">全部已发现模型</option><option value="available">仅显示可调用</option></select></label>
+            </div>
+            <div class="scroll"><table>
+              <thead><tr><th>模型 ID / 名称</th><th>可用账号</th><th>最近校验</th><th>操作</th></tr></thead>
+              <tbody id="modelRows"></tbody>
+            </table></div>
+            <p class="muted note">本列表显示账号实际返回的模型名称；模型出现在目录中不代表每次调用都能成功。当前网关提供文本与客户端工具调用适配，图片、音频等多模态输入暂不支持。</p>
           </section>
           <section class="card" id="tasks">
             <div class="section-heading">

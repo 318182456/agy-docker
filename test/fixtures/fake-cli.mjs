@@ -43,13 +43,28 @@ if (leaks.length) {
   console.error("secret env leaked");
   process.exit(1);
 }
-const response =
+let response =
   message === "PROFILE"
     ? JSON.stringify({
         home: process.env.HOME,
         config: process.env.XDG_CONFIG_HOME,
       })
     : "回答：" + message;
+let structured;
+const schemaIndex = args.indexOf("--json-schema");
+if (schemaIndex >= 0) {
+  const schema = JSON.parse(readFileSync(args[schemaIndex + 1], "utf8"));
+  const hasResult = message.includes('"role":"tool"');
+  const choices = schema.properties.tool_calls.items.properties.name.enum;
+  structured = {
+    content: hasResult || schema.properties.tool_calls.maxItems === 0 ? "5" : "",
+    tool_calls: hasResult || schema.properties.tool_calls.maxItems === 0 ? [] : [
+      {name: message.includes("TOOL_UNKNOWN") ? "undeclared" : choices[0],
+       arguments: JSON.stringify(message.includes("TOOL_BAD_ARGUMENTS") ? {a: "wrong", b: 3} : {a: 2, b: 3})},
+    ],
+  };
+  response = JSON.stringify(structured);
+}
 console.log(
   JSON.stringify({
     event: "init",
@@ -62,6 +77,8 @@ console.log(
     result: {
       status: "SUCCESS",
       response,
+      ...(structured ? {structured_output: structured} : {}),
+      ...(message.includes("TOOL_PARTIAL") ? {finished_reason: "print_timeout"} : {}),
       conversation_id: "test-conversation",
       usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 },
     },

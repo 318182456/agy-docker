@@ -3,8 +3,8 @@ const { Terminal } = xterm;
 
 // Only pinned official CLI setup pages may cause automatic keystrokes.
 export class Onboarding {
-  constructor({ send, changed = () => {}, completed = () => {} }) {
-    Object.assign(this, { send, changed, completed });
+  constructor({ send, changed = () => {}, completed = () => {}, workspace = null }) {
+    Object.assign(this, { send, changed, completed, workspace });
     this.done = new Set();
     this.terminal = new Terminal({
       cols: 180, rows: 60, scrollback: 0,
@@ -38,6 +38,13 @@ export class Onboarding {
     const s = this.screen;
     if (/Select login method:/i.test(s) && /1\. Google OAuth/.test(s))
       this.once("oauth", "\r", "已选择 Google OAuth，等待官方授权链接。");
+    else if (
+      this.workspace && /Accessing workspace:/.test(s) &&
+      s.split("\n").some((line) => line.trim() === this.workspace) &&
+      /Do you trust the contents of this project\?/.test(s) &&
+      /[>❯]\s*Yes, I trust this folder/.test(s)
+    )
+      this.once("workspace-trust", "\r", "已确认本账号的独立空工作目录。");
     else if (/Choose your color scheme:/i.test(s) && /\[Next\]/.test(s))
       this.once("theme", "\t\r", "已自动选择默认终端主题。");
     else if (/help improve Antigravity CLI/i.test(s) && /\[Done\]/.test(s)) {
@@ -45,7 +52,7 @@ export class Onboarding {
         this.once("telemetry-off", " ", "已取消可选的互动数据收集。");
       else
         this.once("setup-done", "\t\t\r", "正在保存官方首次设置。");
-    } else if (this.done.has("setup-done") && !this.done.has("complete")) {
+    } else if ((this.done.has("setup-done") || this.done.has("workspace-trust")) && !/Do you trust the contents of this project/.test(s) && !this.done.has("complete")) {
       this.done.add("complete");
       this.completed();
     }

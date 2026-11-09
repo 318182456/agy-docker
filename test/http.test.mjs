@@ -187,7 +187,7 @@ test("real subprocess probes, account edits, normal request rotation and restart
       400,
     );
   }));
-test("OpenAI text and buffered SSE return real CLI output; unsupported tools and controls fail explicitly", () =>
+test("OpenAI text and buffered SSE return real CLI output; malformed tools and unsupported controls fail explicitly", () =>
   appTest(async ({ call, login }) => {
     await login();
     const a = await (
@@ -205,7 +205,7 @@ test("OpenAI text and buffered SSE return real CLI output; unsupported tools and
     assert.equal((await call("/v1/models", { headers })).status, 200);
     for (const extra of [
       { tools: [{}] },
-      { temperature: 0.2 },
+      { temperature: "hot" },
       { stream: "yes" },
     ])
       assert.equal(
@@ -358,4 +358,57 @@ test("provider authentication failures preserve the independent administrator se
     assert.equal((await rejected.json()).error.code, "login_required");
     assert.equal((await call("/auth/session")).status, 200);
     assert.equal((await call("/api/status")).status, 200);
+  }));
+
+
+test("client tool calls survive CLI structure, HTTP/SSE and a matching tool-result round trip", () =>
+  appTest(async ({call, login}) => {
+    await login();
+    const a = await (await call("/api/accounts", {method: "POST", data: {name: "tools"}})).json();
+    await call("/api/accounts/" + a.id + "/verify", {method: "POST", data: {}});
+    await call("/api/accounts/" + a.id, {method: "PATCH", data: {enabled: true}});
+    const headers = {authorization: "Bearer " + key};
+    const tools = [{type: "function", function: {name: "sum", description: "Add two integers", parameters: {
+      type: "object", properties: {a: {type: "integer"}, b: {type: "integer"}}, required: ["a", "b"], additionalProperties: false,
+    }}}];
+    const request = (data) => call("/v1/chat/completions", {method: "POST", headers, data});
+    const messages = [{role: "user", content: "TOOL_TEST: sum 2 and 3."}];
+    const first = await request({tools, messages, tool_choice: "required", reasoning_effort: "low"});
+    assert.equal(first.status, 200);
+    const reply = (await first.json()).choices[0];
+    assert.equal(reply.finish_reason, "tool_calls");
+    assert.equal(reply.message.content, null);
+    const tool = reply.message.tool_calls[0];
+    assert.equal(tool.function.name, "sum");
+    assert.deepEqual(JSON.parse(tool.function.arguments), {a: 2, b: 3});
+    assert.match(tool.id, /^call_/);
+    const second = await request({tools, messages: [...messages, reply.message, {role: "tool", tool_call_id: tool.id, content: "5"}]});
+    assert.equal(second.status, 200);
+    const answer = (await second.json()).choices[0];
+    assert.equal(answer.finish_reason, "stop");
+    assert.equal(answer.message.content, "5");
+    const stream = await request({tools, messages, stream: true, stream_options: {include_usage: true}});
+    const events = (await stream.text()).split("\n").filter((line) => line.startsWith("data: ") && !line.includes("[DONE]")).map((line) => JSON.parse(line.slice(6)));
+    const streamed = events.flatMap((event) => event.choices || []);
+    const streamedCall = streamed.find((choice) => choice.delta.tool_calls)?.delta.tool_calls[0];
+    assert.equal(streamedCall.index, 0);
+    assert.deepEqual(JSON.parse(streamedCall.function.arguments), {a: 2, b: 3});
+    assert.ok(streamed.some((choice) => choice.finish_reason === "tool_calls"));
+    assert.equal(events.at(-1).usage.total_tokens, 13);
+    const compatible = await request({tools, messages, temperature: 0.2, max_tokens: 4096});
+    assert.equal(compatible.status, 200);
+    assert.equal(compatible.headers.get("x-agy-ignored-parameters"), "temperature,max_tokens");
+    assert.deepEqual((await compatible.json()).agy.ignored_parameters, ["temperature", "max_tokens"]);
+    const none = await request({tools, messages, tool_choice: "none"});
+    assert.equal((await none.json()).choices[0].finish_reason, "stop");
+    for (const content of ["TOOL_BAD_ARGUMENTS", "TOOL_UNKNOWN", "TOOL_PARTIAL"]) {
+      const invalid = await request({tools, messages: [{role: "user", content}]});
+      assert.equal(invalid.status, 502, content);
+      assert.ok(["invalid_tool_output", "incomplete_result"].includes((await invalid.json()).error.code));
+    }
+    for (const data of [
+      {tools, messages: [...messages, {role: "tool", tool_call_id: "missing", content: "5"}]},
+      {tools, messages: [...messages, reply.message]},
+      {tools, messages, tool_choice: {type: "function", function: {name: "unknown"}}},
+    ]) assert.equal((await request(data)).status, 400);
   }));

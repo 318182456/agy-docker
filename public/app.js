@@ -228,8 +228,13 @@ function renderAccounts() {
               "授权码已提交，正在自动完成首次设置并校验实际调用，请稍候。";
           if (value.state === "checking")
             status.textContent = "正在验证持久化登录与真实生成，请等待…";
-          if (value.state === "verified")
+          if (value.state === "verified") {
             status.textContent = "登录与实际调用已通过，可以启用账号。";
+            if (!cell.dataset.verifiedRefreshed) {
+              cell.dataset.verifiedRefreshed = "true";
+              await refresh();
+            }
+          }
           if (
             ["starting", "running", "submitted", "checking"].includes(
               value.state,
@@ -349,6 +354,7 @@ function render() {
   for (const a of enabled) $("taskAccount").add(new Option(a.name, a.id));
   $("taskAccount").value = selection;
   renderModels();
+  renderModelCatalog();
   $("eventRows").replaceChildren();
   for (const event of state.events) {
     const row = document.createElement("tr");
@@ -378,6 +384,63 @@ function render() {
     cell.colSpan = 5;
     row.append(cell);
     $("eventRows").append(row);
+  }
+}
+function renderModelCatalog() {
+  const query = $("modelSearch").value.trim().toLowerCase();
+  const availableOnly = $("modelAvailability").value === "available";
+  const models = new Map();
+  for (const account of state.accounts) {
+    for (const model of account.models || []) {
+      if (!models.has(model.id))
+        models.set(model.id, {id: model.id, name: model.name, accounts: [], available: [], checked: null});
+      const entry = models.get(model.id);
+      entry.accounts.push(account.name);
+      if (account.enabled && account.status === "ready" && account.checked_at) entry.available.push(account.name);
+      if (account.checked_at && (!entry.checked || account.checked_at > entry.checked)) entry.checked = account.checked_at;
+    }
+  }
+  const list = [...models.values()].filter((model) =>
+    (!availableOnly || model.available.length) &&
+    (!query || (model.id + " " + model.name).toLowerCase().includes(query)),
+  ).sort((a, b) => a.id.localeCompare(b.id));
+  $("modelCount").textContent = list.length + " / " + models.size + " 个模型";
+  $("modelRows").replaceChildren();
+  for (const model of list) {
+    const row = document.createElement("tr");
+    const identity = text("td", "");
+    identity.append(text("code", model.id));
+    if (model.name !== model.id) identity.append(text("small", model.name));
+    const accounts = text("td", model.available.length + " / " + model.accounts.length,
+      model.available.length ? "status-ready" : "muted");
+    accounts.append(text("small", model.available.length ? model.available.join("、") : "暂无已启用账号"));
+    accounts.title = "曾返回此模型的账号：" + model.accounts.join("、");
+    const actions = text("td", ""), copy = text("button", "复制 ID", "secondary");
+    copy.type = "button"; copy.setAttribute("aria-label", "复制模型 " + model.id);
+    copy.onclick = async () => {
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(model.id);
+        else {
+          const input = document.createElement("textarea");
+          input.value = model.id; input.readOnly = true;
+          input.style.cssText = "position:fixed;opacity:0";
+          document.body.append(input); input.select();
+          const copied = document.execCommand("copy"); input.remove(); copy.focus();
+          if (!copied) throw Error("复制不可用");
+        }
+        copy.textContent = "已复制";
+      } catch { copy.textContent = "复制失败"; }
+      setTimeout(() => { copy.textContent = "复制 ID"; }, 1800);
+    };
+    actions.append(copy);
+    row.append(identity, accounts, text("td", model.checked
+      ? new Date(model.checked).toLocaleString("zh-CN", {hour12: false}) : "未完成校验"), actions);
+    $("modelRows").append(row);
+  }
+  if (!list.length) {
+    const row = document.createElement("tr"), cell = text("td",
+      models.size ? "没有匹配的模型" : "尚未获取模型。请先添加账号并完成网页登录和校验。", "empty");
+    cell.colSpan = 4; row.append(cell); $("modelRows").append(row);
   }
 }
 function renderModels() {
@@ -429,12 +492,14 @@ $("addForm").onsubmit = async (event) => {
     });
     $("accountName").value = "";
     await refresh();
-    note("accountsFeedback", "已添加 " + a.name + "，请点击该行“登录说明”。");
+    note("accountsFeedback", "已添加 " + a.name + "，请点击该行“登录 agy”。");
   } catch (e) {
     note("accountsFeedback", e.message, true);
   }
 };
 $("taskAccount").onchange = renderModels;
+$("modelSearch").oninput = renderModelCatalog;
+$("modelAvailability").onchange = renderModelCatalog;
 $("taskForm").onsubmit = async (event) => {
   event.preventDefault();
   abortTask = new AbortController();

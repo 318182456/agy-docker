@@ -94,6 +94,8 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
         "/app/scripts/login-pty.sh",
         "/dev/null",
       ]);
+      assert.equal(options.cwd, join(dir, "accounts", a.id, "login-workspace"));
+      assert.notEqual(options.cwd, options.env.HOME);
       env = options.env;
       return child;
     },
@@ -174,6 +176,7 @@ test("finishing login verifies before stopping and keeps the exclusive barrier u
       }),
     );
     assert.ok(manager.current.child);
+    assert.equal(manager.view("owner", a.id).state, "running");
     assert.equal(q.exclusive, true);
     assert.ok(
       manager.view("owner", a.id).text.includes("original provider failure"),

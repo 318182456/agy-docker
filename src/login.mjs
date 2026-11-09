@@ -1,3 +1,5 @@
+import { mkdir, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { AppError, accountId } from "./common.mjs";
@@ -78,6 +80,10 @@ export class LoginManager {
           let timer, keyring;
           try {
             const p = await profilePaths(this.dataDir, id);
+            const workspace = resolve(join(this.dataDir, "accounts", id, "login-workspace"));
+            await mkdir(workspace, {recursive: true, mode: 0o700});
+            if (await realpath(workspace) !== workspace)
+              throw new AppError(400, "登录工作目录不能是符号链接");
             if (!activeStates.has(s.state)) return;
             keyring = await this.keyrings?.acquire(id, p);
             const allowed = [
@@ -104,13 +110,14 @@ export class LoginManager {
               "/usr/bin/script",
               ["-q", "-e", "-c", "/app/scripts/login-pty.sh", "/dev/null"],
               {
-                cwd: p.home,
+                cwd: workspace,
                 env,
                 detached: true,
                 stdio: ["pipe", "pipe", "pipe"],
               },
             ));
             s.onboarding = new Onboarding({
+              workspace,
               send: (data) => {
                 if (s.child === child && ["running", "submitted"].includes(s.state))
                   child.stdin.write(data);
@@ -119,6 +126,7 @@ export class LoginManager {
               completed: () => this.autoVerify(s),
             });
             s.state = "running";
+            if (this.store.get(id).checked_at) this.autoVerify(s);
             await new Promise((resolve, reject) => {
               const out = new StringDecoder("utf8"),
                 err = new StringDecoder("utf8");
@@ -218,15 +226,19 @@ export class LoginManager {
     s.verifyTimer = setTimeout(() => {
       if (this.current !== s || !["running", "submitted"].includes(s.state)) return;
       const screen = s.onboarding?.screen || "";
-      if (/Choose your color scheme:|help improve Antigravity CLI/i.test(screen)) {
+      if (/Choose your color scheme:|help improve Antigravity CLI|Do you trust the contents of this project|Select login method:/i.test(screen)) {
         this.autoVerify(s);
+        return;
+      }
+      if (!s.submitted && loginDisplay(s.raw).url) {
+        s.setup = "等待 Google 官方授权码…";
         return;
       }
       s.autoVerified = true;
       s.setup = "正在验证登录和实际调用…";
       this.finish(s.owner, s.id, (log) => this.verify(s.id, log))
         .then(() => { s.setup = "登录与实际调用通过，可以启用账号。"; })
-        .catch(() => { s.setup = "自动校验未通过，原始错误见完整日志；可在此重试校验。"; });
+        .catch(() => { s.autoVerified = false; s.setup = "自动校验未通过，原始错误见完整日志；可在此重试校验。"; });
     }, 3000);
     s.verifyTimer.unref();
   }
@@ -261,7 +273,7 @@ export class LoginManager {
       this.kill(s);
       return value;
     } catch (error) {
-      s.state = s.child ? "submitted" : "failed";
+      s.state = s.child ? (s.submitted ? "submitted" : "running") : "failed";
       this.append(s, "\n[校验失败] " + error.message + "\n");
       throw error;
     }

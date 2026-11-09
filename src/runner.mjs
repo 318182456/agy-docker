@@ -56,9 +56,11 @@ export class Runner {
   }
   async execute(
     id,
-    { prompt, model = "", probe = false, signal, onOutput } = {},
+    { prompt, model = "", probe = false, signal, onOutput, schema, effort } = {},
   ) {
     modelId(model);
+    if (effort != null && !["low", "medium", "high", "xhigh", "max"].includes(effort))
+      throw new AppError(400, "reasoning_effort 无效", "unsupported_parameter");
     const profile = await profilePaths(this.dataDir, id);
     const work = join(this.dataDir, "work", randomUUID());
     await mkdir(work, { recursive: true, mode: 0o700 });
@@ -87,6 +89,11 @@ export class Runner {
       TEMP: work,
       TMP: work,
     });
+    const schemaPath = join(work, "response-schema.json");
+    if (schema != null) {
+      // ASVS V1.2.5: server-owned fixed path, no shell or user-provided CLI arguments.
+      await writeFile(schemaPath, JSON.stringify(schema), { mode: 0o600 });
+    }
     const args = probe
       ? ["models"]
       : [
@@ -95,6 +102,8 @@ export class Runner {
           "--output-format",
           "stream-json",
           "--disable-slash-commands",
+          ...(schema != null ? ["--json-schema", schemaPath] : []),
+          ...(effort != null ? ["--effort", effort] : []),
           ...(model ? ["--model", model] : []),
         ];
     let keyring;
@@ -206,6 +215,7 @@ export class Runner {
             const result = terminal[0].result;
             if (!result || result.status !== "SUCCESS")
               throw classifyFailure(String(result?.error || ""));
+            if (result.finished_reason) throw new AppError(502, "agy 返回未完成的结果", "incomplete_result");
             if (typeof result.response !== "string" || !result.response.trim())
               throw new AppError(502, "agy 返回空内容", "empty_result");
             const usage = {};
@@ -221,6 +231,7 @@ export class Runner {
             }
             resolve({
               response: result.response,
+              ...(schema != null ? {structured_output: result.structured_output} : {}),
               usage,
               conversation_id: result.conversation_id,
               model:

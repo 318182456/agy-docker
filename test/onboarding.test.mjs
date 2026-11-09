@@ -47,3 +47,27 @@ test("terminal status queries are answered and no optional data collection is en
     assert.ok(!keys.includes(" "));
   } finally { tui.close(); }
 });
+
+test("workspace trust is automatic only for the exact dedicated directory, never the credentials home", async () => {
+  const keys = [];
+  let done = 0;
+  const workspace = "/data/accounts/a_0123456789abcdef/login-workspace";
+  const tui = new Onboarding({workspace, send: (key) => keys.push(key), completed: () => done++});
+  const frame = async (path, selected = "> Yes, I trust this folder") => {
+    tui.write("\x1b[2J\x1b[HAccessing workspace:\r\n\r\n" + path + "\r\n\r\nDo you trust the contents of this project?\r\n" + selected + "\r\nNo, exit");
+    await wait();
+  };
+  try {
+    await frame("/data/accounts/a_0123456789abcdef/home");
+    assert.equal(keys.length, 0);
+    await frame(workspace, "> No, exit");
+    assert.equal(keys.length, 0);
+    await frame(workspace);
+    assert.deepEqual(keys, ["\r"]);
+    await frame(workspace);
+    assert.equal(keys.length, 1);
+    tui.write("\x1b[2J\x1b[HReady for your message");
+    await wait();
+    assert.equal(done, 1);
+  } finally { tui.close(); }
+});
