@@ -1,3 +1,4 @@
+import {normalizeQuota} from "./services/quota.mjs";
 import { Keyrings } from "./keyrings.mjs";
 import { StringDecoder } from "node:string_decoder";
 import { spawn } from "node:child_process";
@@ -56,7 +57,7 @@ export class Runner {
   }
   async execute(
     id,
-    { prompt, model = "", probe = false, signal, onOutput, schema, effort } = {},
+    { prompt, model = "", probe = false, signal, onOutput, schema, effort, quota = false } = {},
   ) {
     modelId(model);
     if (effort != null && !["low", "medium", "high", "xhigh", "max"].includes(effort))
@@ -94,7 +95,7 @@ export class Runner {
       // ASVS V1.2.5: server-owned fixed path, no shell or user-provided CLI arguments.
       await writeFile(schemaPath, JSON.stringify(schema), { mode: 0o600 });
     }
-    const args = probe
+    const args = quota ? ["--print", "/usage", "--output-format", "json"] : probe
       ? ["models"]
       : [
           "--input-format",
@@ -141,7 +142,7 @@ export class Runner {
         const timer = setTimeout(() => {
           failure = new AppError(504, "agy 执行超时，已终止任务", "timeout");
           kill();
-        }, this.timeout);
+        }, quota ? Math.min(this.timeout,15000) : this.timeout);
         const abort = () => {
           failure = new AppError(499, "请求已取消", "cancelled");
           kill();
@@ -182,6 +183,11 @@ export class Runner {
           }
           if (code !== 0) {
             reject(classifyFailure(stdout + "\n" + stderr));
+            return;
+          }
+          if (quota) {
+            try { resolve({quota:normalizeQuota(JSON.parse(stdout))}); }
+            catch(error) { reject(error instanceof AppError?error:new AppError(502,"官方CLI额度输出无效","invalid_quota_output")); }
             return;
           }
           if (probe) {
@@ -251,7 +257,7 @@ export class Runner {
             );
           }
         });
-        if (probe) child.stdin.end();
+        if (probe || quota) child.stdin.end();
         else
           child.stdin.end(
             JSON.stringify({ event: "user", message: { content: prompt } }) +

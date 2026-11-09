@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { AppError, equalSecret } from "./common.mjs";
 export class Auth {
-  constructor({ password, key }) {
+  constructor({ password, key, keyLookup = null }) {
     if (
       !password ||
       !key ||
@@ -12,6 +12,7 @@ export class Auth {
       throw Error(
         "ADMIN_PASSWORD and API_KEY must be distinct and at least 20 characters",
       );
+    this.keyLookup = keyLookup;
     this.password = password;
     this.key = key;
     this.sessions = new Map();
@@ -72,10 +73,11 @@ export class Auth {
   check(req, access) {
     if (access === "public") return null;
     if (access === "api") {
-      if (!equalSecret(req.headers.authorization, "Bearer " + this.key))
-        throw new AppError(401, "API 密钥无效", "invalid_api_key");
-      if (req.headers.origin) this.sameOrigin(req);
-      return { kind: "api" };
+      const primary=equalSecret(req.headers.authorization,"Bearer "+this.key);
+      const managed=primary?null:/^Bearer /.test(req.headers.authorization||"")?this.keyLookup?.(req.headers.authorization.slice(7)):null;
+      if(!primary&&!managed)throw new AppError(401,"API 密钥无效","invalid_api_key");
+      if(req.headers.origin)this.sameOrigin(req);
+      return primary?{kind:"api",key_id:"master",key_name:"总密钥（.env）"}:managed;
     }
     const session = this.session(req);
     if (access === "mutation") {

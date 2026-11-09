@@ -1,0 +1,10 @@
+<section class="card">
+<div class="section-heading"><div><h2>账号列表 <span id="accountCount" class="badge"></span></h2><p class="muted">官方登录状态独立保存。额度为上游剩余比例，所有时间按北京时间显示。</p></div><div class="toolbar"><button id="refreshAllQuotas" class="secondary small">刷新额度</button><button id="showAddAccount" class="small">添加账号</button></div></div>
+<div id="addAccountPanel" class="inline-panel" hidden><form id="addForm" class="inline-form"><label>账号名称<input id="accountName" maxlength="100" required placeholder="邮箱或方便识别的名称"/></label><button>添加</button><button type="button" class="quiet" id="cancelAddAccount">取消</button></form><p id="accountsFeedback" class="feedback" role="status"></p></div>
+<div class="filters"><label>搜索账号<input id="accountSearch" type="search" placeholder="名称或账号 ID"/></label><label>状态<select id="accountStatus"><option value="">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用 / 待启用</option><option value="needs_login">需登录或处理</option></select></label></div>
+<div class="bulk-bar"><label class="check-label"><input id="accountSelectAll" type="checkbox"/>选择当前结果</label><span id="selectionCount" class="muted">未选择账号</span><button id="bulkEnable" class="secondary small" disabled>批量启用</button><button id="bulkDisable" class="secondary small" disabled>批量停用</button></div>
+<p id="bulkFeedback" class="feedback" role="status"></p>
+<div class="scroll"><table class="accounts-table"><thead><tr><th></th><th>账号</th><th>状态</th><th>5 小时剩余</th><th>周额度剩余</th><th>请求 / 成功 / 失败</th><th>报告 Token</th><th>操作</th></tr></thead><tbody id="accountRows"></tbody></table></div>
+<div class="table-footer"><span id="quotaStatus" class="muted">额度后台加载，不触发模型生成。</span><a href="/panel/settings">缓存与日志设置</a></div>
+<p class="muted note">额度按官方返回的分组显示；缺失数据表示未提供，非 0%。校验包含一次真实生成；移除账号只移除管理记录，登录目录保留。</p>
+</section>

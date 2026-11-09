@@ -33,8 +33,8 @@ export function loginDisplay(raw) {
   return { url, text: plain };
 }
 export class LoginManager {
-  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null }) {
-    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify });
+  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null, logger = null }) {
+    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify, logger });
     this.current = null;
   }
   view(owner, id) {
@@ -74,6 +74,7 @@ export class LoginManager {
       bytes: 0,
       checkingPromise: null,
     });
+    this.logger?.info("login.started",{account_id:id});
     this.queue
       .add(
         async () => {
@@ -122,7 +123,7 @@ export class LoginManager {
                 if (s.child === child && ["running", "submitted"].includes(s.state))
                   child.stdin.write(data);
               },
-              changed: (message) => { s.setup = message; },
+              changed: (message) => { s.setup = message; this.logger?.info("login.stage",{account_id:id,stage:message}); },
               completed: () => this.autoVerify(s),
             });
             s.state = "running";
@@ -207,6 +208,7 @@ export class LoginManager {
       loginDisplay(s.raw).url
     ) {
       // OAuth stays in official agy. Code is owner-bound and single-use; full CLI output remains in the protected in-memory login log.
+      this.logger?.info("login.code_submitted",{account_id:id});
       s.submitted = true;
       s.state = "submitted";
       const child = s.child;
@@ -268,11 +270,13 @@ export class LoginManager {
     s.checkingPromise = work.catch(() => {});
     try {
       const value = await work;
+      this.logger?.info("login.verified",{account_id:id});
       s.state = "verified";
       this.append(s, "\n[网页] 登录状态与实际生成验证通过。\n");
       this.kill(s);
       return value;
     } catch (error) {
+      this.logger?.warn("login.verification_failed",{account_id:id,code:error.code||"verification_failed"});
       s.state = s.child ? (s.submitted ? "submitted" : "running") : "failed";
       this.append(s, "\n[校验失败] " + error.message + "\n");
       throw error;

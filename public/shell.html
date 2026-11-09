@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#176e52"/><title>{{title}} · AGY Docker</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml"/><link rel="apple-touch-icon" href="/icon-180.png"/>
+<link rel="stylesheet" href="/style.css"/><script type="module" src="/js/shell.mjs"></script></head>
+<body data-page="{{page}}">
+<a class="skip-link" href="#main">跳到内容</a>
+<div class="app-layout">
+<aside class="sidebar" id="sidebar">
+<a class="brand" href="/panel/overview"><img src="/icon.svg" alt="" width="34" height="34"/><span>AGY Docker<small>官方 CLI 工作台</small></span></a>
+<p class="nav-caption">工作空间</p><nav aria-label="主导航">{{nav}}</nav>
+<div class="sidebar-bottom"><span id="sidebarVersion" class="muted">AGY Docker</span><button id="themeToggle" class="quiet" type="button">切换深浅色</button></div>
+</aside>
+<button id="navBackdrop" class="nav-backdrop" aria-label="关闭导航" hidden></button>
+<div class="main-column">
+<header class="topbar"><div class="topbar-left"><button class="icon-button mobile-only" id="menuToggle" aria-label="打开导航" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="breadcrumb">工作空间 <span>/</span> {{title}}</span></div>
+<div class="toolbar"><span id="runtimeBadge" class="status-pill" hidden>连接中</span><button id="refresh" class="secondary small" hidden>刷新</button><button id="logout" class="quiet small" hidden>退出</button></div></header>
+<main id="main"><div class="page-heading"><div><p class="eyebrow">AGY DOCKER</p><h1>{{title}}</h1><p class="muted">{{description}}</p></div><span id="versionBadge" class="badge">AGY Docker</span></div>
+<section class="card login-card" id="login"><img src="/icon.svg" alt="" width="44" height="44"/><h2>登录管理台</h2><p class="muted">使用部署配置中的管理密码，内外网均可访问。</p>
+<form id="loginForm"><label>管理密码<input id="password" type="password" autocomplete="current-password" required/></label><button>登录</button><p id="loginFeedback" class="feedback" role="status"></p></form></section>
+<div id="workspace" hidden>{{content}}</div>
+<p id="pageFeedback" class="feedback" role="status"></p>
+</main><footer class="page-footer">官方 CLI 执行 · 独立账号目录 · 失败不自动换号重放</footer>
+</div></div></body></html>

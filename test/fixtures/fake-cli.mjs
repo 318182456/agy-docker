@@ -7,6 +7,13 @@ if (args[0] === "models") {
   );
   process.exit(0);
 }
+if (args[0] === "--print" && args[1] === "/usage") {
+  console.log(JSON.stringify({status:"SUCCESS",usage:{total_tokens:0},command:{name:"usage",data:{groups:[
+    {name:"Gemini Models",buckets:[{id:"gemini-5h",window:"5h",remaining_fraction:0.75,reset_time:"2026-11-09T05:00:00Z"},{id:"gemini-weekly",window:"weekly",remaining_fraction:0.9,reset_time:"2026-11-15T05:00:00Z"}]},
+    {name:"Gemini 4 Argon",buckets:[{id:"argon-weekly",window:"weekly",remaining_fraction:1,reset_time:"2026-11-16T05:00:00Z"}]},
+    {name:"Claude and GPT models",buckets:[{id:"3p-5h",window:"5h",remaining_fraction:0,reset_time:"2026-11-09T06:00:00Z"},{id:"3p-weekly",window:"weekly",remaining_fraction:0.5,reset_time:"2026-11-16T06:00:00Z"}]},
+  ]}}}));process.exit(0);
+}
 let input = "";
 for await (const c of process.stdin) input += c;
 const message = JSON.parse(input).message.content;

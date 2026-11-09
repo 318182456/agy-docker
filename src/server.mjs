@@ -1,3 +1,7 @@
+import {Logger} from "./runtime/logger.mjs";
+import {Quotas} from "./services/quota.mjs";
+import {registerAdmin} from "./admin/routes.mjs";
+import {registerPages} from "./admin/pages.mjs";
 import { prepareChat, toolMessage } from "./chat.mjs";
 import { LoginManager } from "./login.mjs";
 import { createServer } from "node:http";
@@ -52,6 +56,7 @@ function promptInput(input) {
 export async function createApplication(options = {}) {
   const dataDir = resolve(options.dataDir || process.env.DATA_DIR || "data");
   const store = options.store || (await new Store(dataDir).init());
+  const logger=options.logger||new Logger({level:process.env.LOG_LEVEL||store.state.settings.log_level});
   const runner =
     options.runner ||
     new Runner({
@@ -66,12 +71,14 @@ export async function createApplication(options = {}) {
   const auth = new Auth({
     password: options.password || process.env.ADMIN_PASSWORD,
     key: options.key || process.env.API_KEY,
+    keyLookup: value=>store.authorizeKey(value),
   });
   const loginManager = new LoginManager({
     dataDir,
     queue,
     store,
     keyrings: runner.keyrings,
+    logger,
     verify: (id, log) => verifyAccount(id, undefined, log),
   });
   const routes = [];
@@ -86,82 +93,48 @@ export async function createApplication(options = {}) {
     });
     res.end(JSON.stringify(value));
   };
-  async function perform(params, signal) {
-    const selected = store.pick(params.account, params.model).id;
-    return queue.add(
-      async () => {
-        const a = store.pick(selected, params.model);
-        const started = Date.now(),
-          id = randomUUID();
-        a.requests++;
-        await store.save();
-        try {
-          const result = await runner.execute(a.id, {
-            prompt: params.prompt,
-            model: params.model,
-            schema: params.schema,
-            effort: params.effort,
-            signal,
-          });
-          result.assistant = toolMessage(result, params.tooling);
-          a.successes++;
-          a.total_tokens += result.usage?.total_tokens || 0;
-          if (Number.isFinite(result.usage?.total_tokens))
-            a.token_reports = (a.token_reports || 0) + 1;
-          a.last_used = new Date().toISOString();
-          a.last_error = null;
-          await store.event({
-            id,
-            account_id: a.id,
-            account_name: a.name,
-            model: params.model || result.model || "默认模型",
-            status: 200,
-            duration_ms: Date.now() - started,
-            total_tokens: result.usage?.total_tokens ?? null,
-          });
-          return {
-            ...result,
-            request_id: id,
-            account: { id: a.id, name: a.name },
-          };
-        } catch (error) {
-          a.failures++;
-          a.last_error = error.code || "internal_error";
-          if (
-            error.code === "account_suspended" ||
-            error.code === "login_required"
-          ) {
-            a.enabled = false;
-            a.status = error.code;
-          }
-          await store.event({
-            id,
-            account_id: a.id,
-            account_name: a.name,
-            model: params.model || "默认模型",
-            status: error.status || 500,
-            code: error.code || "internal_error",
-            duration_ms: Date.now() - started,
-          });
-          throw error;
-        }
-      },
-      signal,
-      { key: selected },
-    );
+  const quotas=new Quotas({store,runner,queue,logger});
+  async function perform(params, signal, context={}) {
+    const selected=store.pick(params.account,params.model).id;
+    context.account_id=selected;context.account_name=store.get(selected).name;
+    const queued=Date.now(),id=context.id||randomUUID();
+    context.stage="queue";
+    logger.info("request.queued",{request_id:id,account_id:selected,model:params.model||"默认模型",api_key_name:context.key_name||"管理台"});
+    return queue.add(async()=>{
+      if(context.key_id)store.assertKeyActive(context.key_id);
+      const a=store.pick(selected,params.model),started=Date.now();
+      context.stage="generation";
+      logger.info("request.started",{request_id:id,account_id:a.id,account_name:a.name,model:params.model||"默认模型",api_key_name:context.key_name||"管理台",queue_ms:started-queued});
+      a.requests++;await store.save();
+      try{
+        const result=await runner.execute(a.id,{prompt:params.prompt,model:params.model,schema:params.schema,effort:params.effort,signal});
+        result.assistant=toolMessage(result,params.tooling);
+        a.successes++;a.total_tokens+=result.usage?.total_tokens||0;
+        if(Number.isFinite(result.usage?.total_tokens))a.token_reports=(a.token_reports||0)+1;
+        a.last_used=new Date().toISOString();a.last_error=null;
+        if(context.key_id){store.endKeyRequest(context.key_id,true,result.usage?.total_tokens);context.outcome=true;}
+        await store.event({id,account_id:a.id,account_name:a.name,api_key_id:context.key_id||"panel",api_key_name:context.key_name||"管理台",
+          model:params.model||result.model||"默认模型",status:200,stage:"completed",duration_ms:Date.now()-started,queue_ms:started-queued,total_tokens:result.usage?.total_tokens??null});
+        context.recorded=true;
+        logger.info("request.completed",{request_id:id,account_id:a.id,model:params.model||result.model||"默认模型",status:200,duration_ms:Date.now()-started,tokens:result.usage?.total_tokens});
+        return {...result,request_id:id,account:{id:a.id,name:a.name}};
+      }catch(error){
+        a.failures++;a.last_error=error.code||"internal_error";
+        if(["account_suspended","login_required"].includes(error.code)){a.enabled=false;a.status=error.code;}
+        if(context.key_id){store.endKeyRequest(context.key_id,false);context.outcome=true;}
+        await store.event({id,account_id:a.id,account_name:a.name,api_key_id:context.key_id||"panel",api_key_name:context.key_name||"管理台",
+          model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",message:error instanceof AppError?error.message:"内部执行失败",stage:"generation",duration_ms:Date.now()-started});
+        context.recorded=true;
+        logger.warn("request.failed",{request_id:id,account_id:a.id,model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",duration_ms:Date.now()-started});
+        throw error;
+      }
+    },signal,{key:selected});
   }
   register("GET", "/health", "public", async ({ res }) =>
     send(res, { status: "ok", version }),
   );
-  for (const [path, name, type] of [
-    ["/", "index.html", "text/html"],
-    ["/app.js", "app.js", "text/javascript"],
-    ["/style.css", "style.css", "text/css"],
-  ])
-    register("GET", path, "public", async ({ res }) => {
-      res.writeHead(200, { "content-type": type + "; charset=utf-8" });
-      res.end(await readFile(join(publicDir, name)));
-    });
+  registerPages({register,publicDir});
+  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas});
   register("POST", "/auth/login", "public", async ({ req, res }) => {
     auth.sameOrigin(req);
     const input = await body(req);
@@ -187,8 +160,8 @@ export async function createApplication(options = {}) {
       send(res, { success: true });
     },
   );
-  register("GET", "/api/status", "read", async ({ res }) =>
-    send(res, {
+  register("GET", "/api/status", "read", async ({ res }) => {
+    store.prune();send(res, {
       version,
       queue: queue.status,
       memory: {
@@ -197,8 +170,11 @@ export async function createApplication(options = {}) {
       },
       accounts: store.list(),
       events: store.state.events,
-    }),
-  );
+      settings:store.state.settings,
+    });
+  });
+  register("GET","/api/accounts","read",async({res})=>send(res,{accounts:store.list(),settings:store.state.settings,version,queue:queue.status}));
+  register("GET","/api/runtime","read",async({res})=>send(res,{version,queue:queue.status,memory:{gateway_rss:process.memoryUsage().rss,cli_rss:await runner.memory()}}));
   register("POST", "/api/accounts", "mutation", async ({ req, res }) =>
     send(res, await store.create(await body(req)), 201),
   );
@@ -369,9 +345,13 @@ export async function createApplication(options = {}) {
     "POST",
     "/v1/chat/completions",
     "api",
-    async ({ req, res, signal }) => {
-      const input = await body(req),
-        params = prepareChat(input, promptInput);
+    async ({ req, res, signal, principal, requestId }) => {
+      const context=req.trace={id:requestId,key_id:principal.key_id,key_name:principal.key_name,stage:"request_prepare",started:Date.now()};
+      store.beginKeyRequest(principal.key_id);
+      logger.info("request.received",{request_id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,stage:"request_prepare"});
+      const input=await body(req);
+      context.model=typeof input.model==="string"?input.model.slice(0,160):"默认模型";
+      const params=prepareChat(input,promptInput);
       if (params.ignoredParameters.length)
         res.setHeader("x-agy-ignored-parameters", params.ignoredParameters.join(","));
       if (params.tooling) res.setHeader("x-agy-tool-mode", "structured-output");
@@ -388,7 +368,7 @@ export async function createApplication(options = {}) {
         }, 15000);
       }
       try {
-        const result = await perform(params, signal);
+        const result = await perform(params, signal, context);
         const id = "chatcmpl-" + result.request_id,
           created = Math.floor(Date.now() / 1000),
           model = result.model || params.model || "agy-default";
@@ -462,6 +442,7 @@ export async function createApplication(options = {}) {
     });
     try {
       const url = new URL(req.url, "http://internal");
+      req.safePath=url.pathname;
       const candidates = routes
         .map((route) => ({
           route,
@@ -492,10 +473,18 @@ export async function createApplication(options = {}) {
         principal,
         match: found.match,
         signal: controller.signal,
+        requestId,
       });
     } catch (e) {
-      if (res.destroyed) return;
       const status = e instanceof AppError ? e.status : 500;
+      if(req.trace&&!req.trace.recorded){
+        const t=req.trace;
+        if(!t.outcome)store.endKeyRequest(t.key_id,false);
+        await store.event({id:requestId,api_key_id:t.key_id,api_key_name:t.key_name,account_id:t.account_id||null,account_name:t.account_name||null,
+          model:t.model||"未提供模型",status,code:e.code||"internal_error",message:e instanceof AppError?e.message:"内部错误",stage:t.stage,duration_ms:Date.now()-t.started}).catch(()=>{});
+      }
+      logger.warn("http.failed",{request_id:requestId,path:req.safePath||"/",method:req.method,status,code:e.code||"internal_error",stage:req.trace?.stage||"request",message:e instanceof AppError?e.message:"内部错误"});
+      if (res.destroyed) return;
       const value = {
         error: {
           message: e instanceof AppError ? e.message : "服务内部错误",
@@ -517,6 +506,8 @@ export async function createApplication(options = {}) {
     queue,
     auth,
     loginManager,
+    quotas,
+    logger,
     catalog: routes.map(({ method, path, access }) => ({
       method,
       path: String(path),
@@ -531,7 +522,7 @@ if (
   const app = await createApplication();
   const port = Number(process.env.PORT || 18861);
   app.server.listen(port, process.env.HOST || "0.0.0.0", () =>
-    console.log("agy-docker listening on port " + port),
+    app.logger.info("service.started",{version,port}),
   );
   const close = () => {
     app.loginManager.close();

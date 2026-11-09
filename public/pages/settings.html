@@ -1,0 +1,12 @@
+<div class="split-layout"><section class="card"><h2>后台设置</h2><p class="muted">保存后立即生效；缩短保留范围会清理超出范围的请求记录。</p><form id="settingsForm"><div class="form-grid">
+<label>日志保留天数<input id="settingRetention" type="number" min="1" max="90" required/></label>
+<label>最多保留记录<input id="settingMaxEntries" type="number" min="100" max="20000" required/></label>
+<label>额度缓存（秒）<input id="settingQuotaTtl" type="number" min="60" max="3600" required/></label>
+<label>默认每页条数<select id="settingPageSize"><option>10</option><option>20</option><option>50</option><option>100</option></select></label>
+<label>Docker 日志级别<select id="settingLogLevel"><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select><small id="logLevelSource" class="muted"></small></label>
+</div><button>保存设置</button><p id="settingsFeedback" class="feedback" role="status"></p></form>
+<div class="notice"><strong>Docker 日志会记录什么</strong><p>请求开始、完成和失败，账号、模型、阶段、请求 ID、执行与排队耗时，以及额度刷新、官方授权进度。通过请求 ID 与“请求记录”页对应。</p></div></section>
+<section class="card"><h2>部署与运行</h2><p class="muted">以下由 .env 和容器部署控制。</p><dl id="runtimeSettings" class="info-grid"></dl>
+<div class="notice"><strong>并发与超时</strong><p>MAX_CONCURRENCY、QUEUE_LIMIT、TASK_TIMEOUT_SECONDS 在 .env 中设置，重新部署后生效。管理密码和总 API 密钥也由 .env 管理。</p></div>
+<div class="toolbar"><a class="button secondary small" href="https://github.com/318182456/agy-docker" target="_blank" rel="noopener noreferrer">项目仓库</a><a class="button secondary small" href="/panel/access">接口支持范围</a></div>
+</section></div>
