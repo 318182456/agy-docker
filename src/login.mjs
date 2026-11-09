@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { AppError, accountId } from "./common.mjs";
 import { profilePaths } from "./runner.mjs";
+import { Onboarding } from "./onboarding.mjs";
 const activeStates = new Set(["starting", "running", "submitted", "checking"]);
 export function loginDisplay(raw) {
   const plain = raw
@@ -18,15 +19,11 @@ export function loginDisplay(raw) {
   ]) {
     try {
       const u = new URL(value);
+      // ASVS V1.2.2: terms/privacy links are not OAuth authorization requests.
       if (
-        [
-          "accounts.google.com",
-          "antigravity.google",
-          "antigravity.google.com",
-        ].includes(u.hostname) &&
-        !u.username &&
-        !u.password &&
-        !u.port
+        u.hostname === "accounts.google.com" &&
+        /^\/(?:o\/oauth2\/|signin\/oauth\/)/.test(u.pathname) &&
+        !u.username && !u.password && !u.port
       )
         url = u.href;
     } catch {}
@@ -34,8 +31,8 @@ export function loginDisplay(raw) {
   return { url, text: plain };
 }
 export class LoginManager {
-  constructor({ dataDir, queue, store, keyrings = null, launch = spawn }) {
-    Object.assign(this, { dataDir, queue, store, keyrings, launch });
+  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null }) {
+    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify });
     this.current = null;
   }
   view(owner, id) {
@@ -45,6 +42,8 @@ export class LoginManager {
     return {
       state: s.state,
       text: loginDisplay(s.raw).text,
+      screen: s.onboarding?.screen || "",
+      setup: s.setup || "正在初始化官方 CLI…",
       url: s.submitted ? null : loginDisplay(s.raw).url,
     };
   }
@@ -111,12 +110,26 @@ export class LoginManager {
                 stdio: ["pipe", "pipe", "pipe"],
               },
             ));
+            s.onboarding = new Onboarding({
+              send: (data) => {
+                if (s.child === child && ["running", "submitted"].includes(s.state))
+                  child.stdin.write(data);
+              },
+              changed: (message) => { s.setup = message; },
+              completed: () => this.autoVerify(s),
+            });
             s.state = "running";
             await new Promise((resolve, reject) => {
               const out = new StringDecoder("utf8"),
                 err = new StringDecoder("utf8");
-              child.stdout.on("data", (b) => this.append(s, out.write(b)));
-              child.stderr.on("data", (b) => this.append(s, err.write(b)));
+              child.stdout.on("data", (b) => {
+                s.onboarding.write(b);
+                this.append(s, out.write(b));
+              });
+              child.stderr.on("data", (b) => {
+                s.onboarding.write(b);
+                this.append(s, err.write(b));
+              });
               child.stdin.on("error", () => {});
               child.once("error", () =>
                 reject(
@@ -152,6 +165,8 @@ export class LoginManager {
             this.append(s, "\n[启动错误] " + error.message + "\n");
           } finally {
             clearTimeout(timer);
+            clearTimeout(s.verifyTimer);
+            s.onboarding?.close();
             s.child = null;
             await keyring?.release();
           }
@@ -189,10 +204,31 @@ export class LoginManager {
       const child = s.child;
       child.stdin.write("\x1b[200~" + value.code + "\x1b[201~");
       setTimeout(() => {
-        if (s.child === child) child.stdin.write("\r");
+        if (s.child === child) {
+          child.stdin.write("\r");
+          this.autoVerify(s);
+        }
       }, 80).unref();
     } else throw new AppError(400, "仅允许选择菜单或提交官方授权码");
     return this.view(owner, id);
+  }
+  autoVerify(s) {
+    if (!this.verify || s.autoVerified) return;
+    clearTimeout(s.verifyTimer);
+    s.verifyTimer = setTimeout(() => {
+      if (this.current !== s || !["running", "submitted"].includes(s.state)) return;
+      const screen = s.onboarding?.screen || "";
+      if (/Choose your color scheme:|help improve Antigravity CLI/i.test(screen)) {
+        this.autoVerify(s);
+        return;
+      }
+      s.autoVerified = true;
+      s.setup = "正在验证登录和实际调用…";
+      this.finish(s.owner, s.id, (log) => this.verify(s.id, log))
+        .then(() => { s.setup = "登录与实际调用通过，可以启用账号。"; })
+        .catch(() => { s.setup = "自动校验未通过，原始错误见完整日志；可在此重试校验。"; });
+    }, 3000);
+    s.verifyTimer.unref();
   }
   append(s, text) {
     s.raw += text;
@@ -231,6 +267,7 @@ export class LoginManager {
     }
   }
   kill(s) {
+    clearTimeout(s.verifyTimer);
     if (s.child)
       try {
         process.kill(-s.child.pid, "SIGKILL");

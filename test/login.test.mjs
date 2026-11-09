@@ -61,6 +61,9 @@ test("login parser uses full official OSC link and rejects untrusted destination
   assert.equal(value.url, url);
   assert.ok(value.text.includes("https://accounts.google.com/o/"));
   assert.equal(loginDisplay("https://evil.example/auth").url, null);
+  assert.equal(loginDisplay("Terms: https://antigravity.google/terms").url, null);
+  assert.equal(loginDisplay("https://accounts.google.com/").url, null);
+  assert.equal(loginDisplay(url + "\nTerms: https://antigravity.google/terms").url, url);
   assert.equal(
     loginDisplay("https://accounts.google.com.evil.example").url,
     null,

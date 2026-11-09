@@ -1,0 +1,49 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { Onboarding } from "../src/onboarding.mjs";
+const wait = () => new Promise((r) => setTimeout(r, 260));
+
+test("official setup is automatic, opts out of optional collection, and does not replay stale screens", async () => {
+  const keys = [], messages = [];
+  let completed = 0;
+  const tui = new Onboarding({send: (key) => keys.push(key), changed: (s) => messages.push(s), completed: () => completed++});
+  const frame = async (s) => { tui.write("\x1b[2J\x1b[H" + s); await wait(); };
+  try {
+    await frame("Select login method:\r\n > 1. Google OAuth\r\n 2. Use a Google Cloud project");
+    assert.deepEqual(keys, ["\r"]);
+    await frame("Open the URL below in your browser:\r\nauthorization code...");
+    assert.equal(keys.length, 1);
+    await frame("Choose your color scheme:\r\n > terminal\r\n[Next]");
+    assert.equal(keys.at(-1), "\t\r");
+    await frame("Choose your color scheme:\r\n > terminal\r\n[Next]");
+    assert.equal(keys.length, 2);
+    await frame("[x] Yes, I agree to help improve Antigravity CLI\r\n[Previous] [Done]");
+    assert.equal(keys.at(-1), " ");
+    await frame("[ ] Yes, I agree to help improve Antigravity CLI\r\n[Previous] [Done]");
+    assert.equal(keys.at(-1), "\t\t\r");
+    await frame("Ready for your message");
+    assert.equal(completed, 1);
+    assert.ok(!tui.screen.includes("Choose your color scheme"));
+    assert.ok(!tui.screen.includes("Yes, I agree"));
+    await frame("Ready for your message");
+    assert.equal(completed, 1);
+    await frame("Unknown future prompt: delete all files? Press Enter");
+    assert.equal(keys.length, 4);
+    assert.ok(messages.length >= 4);
+  } finally { tui.close(); }
+  assert.ok(tui.screen.includes("Unknown future prompt"));
+});
+
+test("terminal status queries are answered and no optional data collection is enabled when already unchecked", async () => {
+  const keys = [];
+  const tui = new Onboarding({send: (key) => keys.push(key)});
+  try {
+    tui.write("\x1b[6n");
+    await wait();
+    assert.equal(keys[0], "\x1b[1;1R");
+    tui.write("\x1b[2J\x1b[H[ ] Yes, I agree to help improve Antigravity CLI\r\n[Previous] [Done]");
+    await wait();
+    assert.equal(keys.at(-1), "\t\t\r");
+    assert.ok(!keys.includes(" "));
+  } finally { tui.close(); }
+});

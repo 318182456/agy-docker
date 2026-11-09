@@ -105,12 +105,18 @@ function renderAccounts() {
       cell.append(
         text(
           "p",
-          "先完成 Google 官方授权，再使用下方按钮完成主题、显示模式等首次设置。已有登录状态会直接进入设置；Google 密码只在 Google 页面输入。",
+          "首次设置自动完成，默认不启用互动数据收集。只需打开官方授权页并粘贴一次授权码，程序会自动校验实际调用；Google 密码只在 Google 页面输入。",
         ),
       );
       const terminal = text("pre", "正在启动官方登录…", "login-terminal");
       terminal.setAttribute("aria-label", "官方 agy 登录状态");
       const status = text("p", "", "feedback");
+      status.setAttribute("aria-live", "polite");
+      const fullLog = text("details", "", "login-details");
+      const logText = text("pre", "", "login-terminal");
+      fullLog.append(text("summary", "完整 CLI 日志"), logText);
+      const manual = text("details", "", "login-details");
+      manual.append(text("summary", "手动控制（自动设置遇到新菜单时使用）"));
       const link = text("a", "打开 Google 官方授权页面", "button-link");
       link.target = "_blank";
       link.rel = "noopener noreferrer";
@@ -195,7 +201,8 @@ function renderAccounts() {
       };
       end.onclick = () => finish(true);
       cancel.onclick = () => finish(false);
-      cell.append(terminal, controls, link, form, status, end, cancel);
+      manual.append(controls, end);
+      cell.append(status, link, form, terminal, fullLog, manual, cancel);
       const poll = async () => {
         clearTimeout(pollTimer);
         if (loginPanels.get(a.id) !== cell) return;
@@ -204,7 +211,9 @@ function renderAccounts() {
           const follow =
             terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight <
             32;
-          terminal.textContent = value.text || "正在启动官方登录…";
+          terminal.textContent = value.screen || value.text || "正在启动官方登录…";
+          logText.textContent = value.text || "";
+          status.textContent = value.setup || "正在自动完成官方首次设置…";
           if (follow) terminal.scrollTop = terminal.scrollHeight;
           link.hidden = !value.url;
           if (value.url) link.href = value.url;
@@ -216,7 +225,7 @@ function renderAccounts() {
           }
           if (value.state === "submitted")
             status.textContent =
-              "授权码已提交。若日志出现主题、[Next] 等设置菜单，请用上下选择、确认/下一步继续；初始化完成后再校验登录。";
+              "授权码已提交，正在自动完成首次设置并校验实际调用，请稍候。";
           if (value.state === "checking")
             status.textContent = "正在验证持久化登录与真实生成，请等待…";
           if (value.state === "verified")

@@ -127,6 +127,7 @@ export async function createApplication(options = {}) {
     queue,
     store,
     keyrings: runner.keyrings,
+    verify: (id, log) => verifyAccount(id, undefined, log),
   });
   const routes = [];
   function register(method, path, access, handler) {
