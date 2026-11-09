@@ -9,6 +9,7 @@ import { Runner } from "./runner.mjs";
 import { SerialQueue } from "./queue.mjs";
 import { Auth } from "./auth.mjs";
 import { AppError, object, modelId } from "./common.mjs";
+const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 async function body(req) {
   if (
@@ -203,7 +204,7 @@ export async function createApplication(options = {}) {
     );
   }
   register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version: "0.1.8" }),
+    send(res, { status: "ok", version }),
   );
   for (const [path, name, type] of [
     ["/", "index.html", "text/html"],
@@ -241,7 +242,7 @@ export async function createApplication(options = {}) {
   );
   register("GET", "/api/status", "read", async ({ res }) =>
     send(res, {
-      version: "0.1.8",
+      version,
       queue: queue.status,
       memory: {
         gateway_rss: process.memoryUsage().rss,

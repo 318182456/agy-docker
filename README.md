@@ -28,7 +28,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.1.9`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.1.10`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -85,7 +85,7 @@ NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-prese
 
 ## 镜像发布与开发
 
-GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.9` 对应镜像 `0.1.9`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
+GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.1.10` 对应镜像 `0.1.10`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
 
 镜像首次发布后，GHCR包需设为Public才能匿名拉取（GitHub默认Private）；私有部署使用有read:packages权限的凭据登录GHCR。官方CLI归Google所有，本仓库不改变其条款或订阅限制。
 
@@ -93,3 +93,4 @@ GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GH
 
 镜像提供D-Bus及GNOME Keyring，按账号隔离会话总线、密钥环和HOME。授权状态由官方CLI存入账号自己的持久化目录；临时总线及守护进程在最后一个使用者结束后退出。密钥环解锁材料由程序生成并存于账号目录，不能提交Git。HTTP代理会作为HTTPS_PROXY的默认值，支持Google授权码交换。管理页完整显示CLI登录日志和原始错误，日志仅当前会话内存可见、不写入应用日志文件；取消和校验不会隐藏原始错误。
 \n网页登录自动选择Google OAuth、默认主题并关闭可选互动数据收集；用户只需在Google官方页面授权并粘贴一次授权码，程序随后自动执行小规模真实调用校验。当前终端画面与完整CLI日志分别显示，未知新菜单可展开手动控制。\n
+NAS迁移或复制数据后，目录和文件需归属容器用户UID/GID 1000:1000。若启动日志出现 /data/state.json 的 EACCES，先核对实际挂载目录，再修复该目录归属；不要将所有文件改为777，也不要用另一份空数据覆盖账号。
