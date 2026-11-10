@@ -44,12 +44,12 @@ export class LoginManager {
     return {
       state: s.state,
       code_submitted: s.submitted,
-      can_submit_code: s.state === "running" && !!s.child && !s.submitted && !!loginDisplay(s.raw).url,
+      can_submit_code: s.state === "running" && !!s.child && !s.submitted && !s.onboarding?.done.has("complete") && !!loginDisplay(s.raw).url,
       verification_error: s.verificationError || null,
       text: loginDisplay(s.raw).text,
       screen: s.onboarding?.screen || "",
       setup: s.setup || "正在初始化官方 CLI…",
-      url: s.submitted ? null : loginDisplay(s.raw).url,
+      url: s.submitted || s.onboarding?.done.has("complete") ? null : loginDisplay(s.raw).url,
     };
   }
   start(owner, id) {
@@ -206,7 +206,7 @@ export class LoginManager {
     if (value.key && keys[value.key] && s.state !== "checking")
       s.child.stdin.write(keys[value.key]);
     else if (
-      s.state === "running" &&
+      s.state === "running" && !s.onboarding?.done.has("complete") &&
       typeof value.code === "string" &&
       /^[A-Za-z0-9_./~+\-=]{4,2048}$/.test(value.code) &&
       !s.submitted &&
@@ -239,10 +239,6 @@ export class LoginManager {
       }
       if (!s.submitted && !s.onboarding?.done.has("complete")) {
         s.setup = "等待 Google 官方授权和首次设置完成…";
-        return;
-      }
-      if (!s.submitted && loginDisplay(s.raw).url) {
-        s.setup = "等待 Google 官方授权码…";
         return;
       }
       s.autoVerified = true;

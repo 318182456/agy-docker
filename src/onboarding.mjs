@@ -36,6 +36,8 @@ export class Onboarding {
   }
   advance() {
     const s = this.screen;
+    // A saved profile can skip every setup screen. Require both the configured workspace and native input chrome.
+    const ready = this.workspace && s.includes(this.workspace) && /\? for shortcuts/i.test(s) && /(?:^|\n)\s*[>❯]\s*(?:\n|$)/.test(s);
     if (/Select login method:/i.test(s) && /1\. Google OAuth/.test(s))
       this.once("oauth", "\r", "已选择 Google OAuth，等待官方授权链接。");
     else if (
@@ -52,8 +54,9 @@ export class Onboarding {
         this.once("telemetry-off", " ", "已取消可选的互动数据收集。");
       else
         this.once("setup-done", "\t\t\r", "正在保存官方首次设置。");
-    } else if ((this.done.has("setup-done") || this.done.has("workspace-trust")) && !/Do you trust the contents of this project/.test(s) && !this.done.has("complete")) {
+    } else if ((ready || ((this.done.has("setup-done") || this.done.has("workspace-trust")) && /Ready for your message/i.test(s))) && !this.done.has("complete")) {
       this.done.add("complete");
+      this.changed("已进入官方 agy 主界面，正在准备校验登录…");
       this.completed();
     }
   }

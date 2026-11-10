@@ -66,8 +66,25 @@ test("workspace trust is automatic only for the exact dedicated directory, never
     assert.deepEqual(keys, ["\r"]);
     await frame(workspace);
     assert.equal(keys.length, 1);
+    tui.write("\x1b[2J\x1b[HCopy the authorization code and paste it below:\r\nauthorization code...");
+    await wait();
+    assert.equal(done, 0);
     tui.write("\x1b[2J\x1b[HReady for your message");
     await wait();
     assert.equal(done, 1);
   } finally { tui.close(); }
+});
+
+
+test("saved profiles reaching the native prompt skip setup and complete once even with the plan notice", async () => {
+  const workspace="/data/accounts/a_0123456789abcdef/login-workspace",keys=[];let completed=0;
+  const tui=new Onboarding({workspace,send:key=>keys.push(key),completed:()=>completed++});
+  const frame=async value=>{tui.write("\x1b[2J\x1b[H"+value);await wait();};
+  try {
+    await frame(workspace+"\r\nauthorization code...\r\n>");assert.equal(completed,0);
+    await frame("/different/workspace\r\n>\r\n? for shortcuts\r\nGemini 3.8 Flash · high");assert.equal(completed,0);
+    const ready=workspace+"\r\nChanges to third-party model access\r\nesc to dismiss\r\n>\r\n? for shortcuts\r\nGemini 3.8 Flash · high";
+    await frame(ready);assert.equal(completed,1);assert.deepEqual(keys,[]);
+    await frame(ready);assert.equal(completed,1);
+  } finally {tui.close();}
 });

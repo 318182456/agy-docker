@@ -257,3 +257,22 @@ test("failed verification restores unsubmitted code input; consumed codes requir
     manager.stop("owner",account.id);await manager.current.work;assert.equal(queue.running,0);
   } finally {manager.close();await rm(dir,{recursive:true,force:true});}
 });
+
+
+test("ready saved profiles verify despite historical OAuth output without accepting another code", async () => {
+  const dir=await mkdtemp(join(tmpdir(),"agy-ready-profile-")),store=await new Store(dir).init(),a=await store.create({name:"saved"}),queue=new SerialQueue();
+  const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();let probes=0;
+  const manager=new LoginManager({dataDir:dir,store,queue,launch:()=>child,verify:async()=>{probes++;return{ok:true};}});
+  manager.kill=s=>{clearTimeout(s.verifyTimer);if(s.child)queueMicrotask(()=>s.child?.emit("close",0));};
+  try {
+    manager.start("owner",a.id);for(let i=0;i<100&&!manager.current.child;i++)await tick();
+    child.stdout.write("https://accounts.google.com/o/oauth2/auth?state=synthetic-old\r\n");
+    const workspace=join(dir,"accounts",a.id,"login-workspace");
+    child.stdout.write("\x1b[2J\x1b[H"+workspace+"\r\n>\r\n? for shortcuts\r\nGemini 3.8 Flash · high");
+    for(let i=0;i<100&&!manager.current.onboarding.done.has("complete");i++)await tick();
+    assert.throws(()=>manager.input("owner",a.id,{code:"synthetic-new-code"}));
+    for(let i=0;i<240&&manager.view("owner",a.id).state!=="verified";i++)await tick();
+    assert.equal(probes,1);const view=manager.view("owner",a.id);assert.equal(view.state,"verified");assert.equal(view.can_submit_code,false);assert.equal(view.url,null);
+    await manager.current.work;
+  } finally {manager.close();await rm(dir,{recursive:true,force:true});}
+});
