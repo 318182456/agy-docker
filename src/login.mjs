@@ -33,8 +33,8 @@ export function loginDisplay(raw) {
   return { url, text: plain };
 }
 export class LoginManager {
-  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null, logger = null }) {
-    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify, logger });
+  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null, logger = null, beforeLogin = null }) {
+    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify, logger, beforeLogin });
     this.current = null;
   }
   view(owner, id) {
@@ -83,6 +83,7 @@ export class LoginManager {
         async () => {
           let timer, keyring;
           try {
+            await this.beforeLogin?.();
             const p = await profilePaths(this.dataDir, id);
             const workspace = resolve(join(this.dataDir, "accounts", id, "login-workspace"));
             await mkdir(workspace, {recursive: true, mode: 0o700});
@@ -106,6 +107,7 @@ export class LoginManager {
             );
             env.HTTPS_PROXY ||= env.HTTP_PROXY;
             Object.assign(env, p.env, keyring?.env, {
+              AGY_CLI_DISABLE_AUTO_UPDATE: "true",
               TERM: "xterm-256color",
               LANG: "C.UTF-8",
               SSH_CONNECTION: "127.0.0.1 1 127.0.0.1 22",

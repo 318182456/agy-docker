@@ -1,5 +1,5 @@
 const priorities = {debug: 10, info: 20, warn: 30, error: 40, silent: 100};
-const allowed = new Set(["request_id","method","path","status","code","stage","account_id","account_name","model","api_key_id","api_key_name","duration_ms","queue_ms","tokens","version","port","count","level","exit_code","message"]);
+const allowed = new Set(["request_id","session_id","method","path","status","code","stage","account_id","account_name","model","api_key_id","api_key_name","duration_ms","queue_ms","tokens","version","port","count","level","exit_code","message"]);
 function safe(value) {
   return typeof value === "string" ? value.slice(0, 500).replace(/\b(?:sk-|ya29\.|gh[pousr]_)[A-Za-z0-9_.-]{10,}/g,"[credential]") : value;
 }

@@ -1,4 +1,5 @@
 FROM node:22-bookworm-slim
+ENV AGY_CLI_DISABLE_AUTO_UPDATE=true
 RUN apt-get update && apt-get install -y --no-install-recommends dbus gnome-keyring libsecret-tools && rm -rf /var/lib/apt/lists/*
 COPY scripts/install-cli.mjs /tmp/install-cli.mjs
 RUN --mount=type=bind,target=/build-context node /tmp/install-cli.mjs && tar -xzf /tmp/agy.tar.gz -C /tmp antigravity && \
@@ -7,7 +8,7 @@ RUN --mount=type=bind,target=/build-context node /tmp/install-cli.mjs && tar -xz
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AGY Docker" \
       org.opencontainers.image.source="https://github.com/318182456/agy-docker" \
-      org.opencontainers.image.version="0.2.2"
+      org.opencontainers.image.version="0.3.0"
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts

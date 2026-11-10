@@ -1,5 +1,5 @@
 import {AppError} from "../common.mjs";
-export function registerKeys({register,send,body,store,auth,logger}){
+export function registerKeys({register,send,body,store,auth,logger,sessions}){
   register("GET","/api/keys","read",async({res})=>send(res,{items:store.listKeys(),master:{id:"master",name:"总密钥（.env）",enabled:true,last4:auth.key.slice(-4),source:".env",usage:store.state.master_usage}}));
   register("POST","/api/keys","mutation",async({req,res})=>{
     const input=await body(req);const items=await store.createKeys([input],{reserved:[auth.password,auth.key]});logger.info("keys.created",{count:1});send(res,items[0],201);
@@ -15,9 +15,16 @@ export function registerKeys({register,send,body,store,auth,logger}){
     }else if(Array.isArray(input.items))rows=input.items;
     const items=await store.createKeys(rows,{reserved:[auth.password,auth.key]});logger.info("keys.imported",{count:items.length});send(res,{items,count:items.length},201);
   });
-  register("PATCH",/^\/api\/keys\/(k_[a-f0-9]{16})$/,"mutation",async({req,res,match})=>send(res,await store.patchKey(match[1],await body(req))));
+  register("PATCH",/^\/api\/keys\/(k_[a-f0-9]{16})$/,"mutation",async({req,res,match})=>{
+    const key=await store.patchKey(match[1],await body(req));
+    if(!key.enabled || (key.expires_at && Date.parse(key.expires_at)<=Date.now()))
+      await sessions?.closeWhere(s=>s.owner==="api:"+match[1]);
+    send(res,key);
+  });
   register("POST",/^\/api\/keys\/(k_[a-f0-9]{16})\/reveal$/,"mutation",async({res,match})=>send(res,{value:store.getKey(match[1]).value}));
   register("DELETE",/^\/api\/keys\/(k_[a-f0-9]{16})$/,"mutation",async({res,match})=>{
-    store.getKey(match[1]);store.state.keys=store.state.keys.filter(k=>k.id!==match[1]);await store.save();logger.info("keys.deleted",{});send(res,{deleted:true});
+    store.getKey(match[1]);store.state.keys=store.state.keys.filter(k=>k.id!==match[1]);await store.save();
+    await sessions?.closeWhere(s=>s.owner==="api:"+match[1]);
+    logger.info("keys.deleted",{});send(res,{deleted:true});
   });
 }

@@ -105,6 +105,7 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
     for (let n = 0; n < 100 && !manager.current.child; n++) await tick();
     assert.equal(env.ADMIN_PASSWORD, undefined);
     assert.equal(env.API_KEY, undefined);
+    assert.equal(env.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
     assert.equal(q.exclusive, true);
     child.stdout.write(
       "Authorize https://accounts.google.com/o/oauth2/auth?state=synthetic\n",

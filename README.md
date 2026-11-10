@@ -28,7 +28,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.2.2`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.3.0`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -73,9 +73,24 @@ docker compose up -d
 - `GET /v1/models`：Bearer API_KEY，读取已启用账号缓存的真实模型目录，不额外查询 Google。
 - `POST /v1/chat/completions`：Bearer API_KEY。支持文本 messages、model、stream、account_id，以及客户端 function tools/tool_choice/parallel_tool_calls、assistant.tool_calls 和 tool 结果消息。工具通过官方 --json-schema 结构化输出适配，由客户端执行；不是CLI原生工具透传，也不会在NAS运行客户端工具。支持reasoning_effort映射到官方 --effort。图片/音频暂不支持。
 - `POST /api/tasks`：管理会话与CSRF，用于网页原生任务提交。
+- `GET /v1/sessions`、`DELETE /v1/sessions/{id}`：Bearer API_KEY，只列出/关闭当前密钥创建的常驻会话。`/api/sessions` 为对应的管理登录接口，读取需会话，关闭需同源与CSRF；与API密钥会话相互隔离。
 - `/api/accounts` 与 `/api/status`：仅管理会话；API密钥不能访问。
 
 OpenAI 文本会话会序列化为文字交给 agy，而不是原始模型协议。agy 自身有系统指令和权限策略，不是裸模型 API；不能承诺外部 Agent 的所有行为兼容。客户端函数工具通过结构化输出适配；并非原生工具透传。
+
+### 显式连续会话
+
+默认仍是一次请求启动一个官方 CLI 进程，结束即回收，不跨请求共享上下文。需要连续对话时，在首次 Chat Completions 请求中加入 `"session_id":"new"`，从响应 `agy.session.id` 取得网关会话 ID。后续请求使用该 ID，并像普通 OpenAI 客户端一样发送完整 `messages`（包括网关实际返回的 assistant 消息），再追加 user 或 tool 消息。网关校验此前历史的指纹，仅把新增消息交给同一官方 CLI 进程；历史被修改或缺失时返回409，不重复发送历史。
+
+会话绑定创建它的API密钥/管理登录、账号、模型、reasoning_effort和工具定义，不自动换号。改变这些配置、切换客户端消息分支或开始不同话题时，应关闭旧会话并显式创建新会话。SSE仍为缓冲输出，会话信息在标准 chunk 的 `agy.session` 中，不额外伪造文本流。
+
+`SESSION_LIMIT` 默认2（1–16），限制全局常驻会话数量；`SESSION_IDLE_SECONDS` 默认120，最长1800；`SESSION_MAX_TURNS` 默认50（1–1000）。会话不写入网关state.json，重启后失效。运行中的任务仍受 `MAX_CONCURRENCY` 和同账号串行约束；官方CLI会话仍可能写入其受限账号目录。达到容量返回429，不能静默驱逐其他会话。
+
+超时、取消、CLI失败、密钥撤销、账号停用及退出管理登录会关闭相应会话。进入排他登录前回收全部空闲会话；校验账号前回收该账号会话。过期/关闭后返回404，不自动重建或重放。官方stream-json的用量为会话累计值，本层换算为本轮差量；未报告或无法可靠换算的字段保持未报告，避免重复计费。
+
+此执行层只使用官方CLI的 `--input-format stream-json --output-format stream-json`，没有启用Remote Control后台系统服务。Remote Control可另作官方同账号远程操作入口；Remote Agents不支持Print模式，ACP的第三方模型客户端限制也尚未在本项目验证，因此当前均不用于生产执行路径。
+
+镜像构建、任务与登录进程固定设置官方 `AGY_CLI_DISABLE_AUTO_UPDATE=true`，避免请求期间自更新或启动后台更新器。CLI仍可升级：更新 `scripts/install-cli.mjs` 中的版本、官方附件ID/大小与SHA-256，执行回归和真实协议验证后，发布新的版本化镜像；不要在运行中的只读容器内原地升级。关闭自更新不表示永久停留旧版，也不修改宿主机全局CLI配置。
 
 ## 安全与资源
 
@@ -83,7 +98,7 @@ OpenAI 文本会话会序列化为文字交给 agy，而不是原始模型协议
 - CLI严格工具审批，超出工作区访问关闭；程序不给CLI传管理密码或客户端API密钥，不使用 `--dangerously-skip-permissions`。
 - 通过 `spawn` 参数数组和结构化 stdin 传内容，不拼接shell；显式拒绝 CLI 本地文件引用，内容应由客户端直接提交。账号ID、模型、正文大小、输出、队列均有边界。
 - 管理会话为随机HttpOnly Cookie，空闲30分钟、绝对12小时，HTTPS地址启用Secure；修改需同源与CSRF。登录失败每来源10分钟最多10次，不信任客户端X-Forwarded-For。
-- Compose内存上限2GiB，仅作为保护上限，并非预先占用。程序按配置限制并发，同账号串行。实际占用由页面及 `docker stats` 查询；账号目录不等于常驻CLI，只有执行任务时启动进程。
+- Compose内存上限2GiB，仅作为保护上限，并非预先占用。程序按配置限制并发，同账号串行。实际占用由页面及 `docker stats` 查询；普通请求结束即释放CLI，显式连续会话会在空闲期限内保留进程和账号密钥环，常驻数受SESSION_LIMIT约束。
 - 本程序对提示词/回答只做返回，不写进元数据记录；官方CLI仍可能在自己的目录写日志/会话。不要将data/.env或授权文件提交Git。
 
 Google当前FAQ说明：消费订阅下将agy包装到第三方应用或自动账号轮换不受支持；真实官方进程及Docker隔离都不构成防封保证。参照 https://antigravity.google/docs/faq/ 。
@@ -104,7 +119,7 @@ NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-prese
 
 ## 镜像发布与开发
 
-GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.2.2` 对应镜像 `0.2.2`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
+GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.3.0` 对应镜像 `0.3.0`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
 
 镜像首次发布后，GHCR包需设为Public才能匿名拉取（GitHub默认Private）；私有部署使用有read:packages权限的凭据登录GHCR。官方CLI归Google所有，本仓库不改变其条款或订阅限制。
 

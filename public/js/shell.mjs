@@ -5,7 +5,7 @@ const ctx={state:null,api,$,el,note,params:new URLSearchParams(location.search),
   ctx.state=await api("/api/accounts");await controller?.render?.();updateRuntime(ctx.state);
 }};
 function updateRuntime(data){
-  const queue=data.queue;if(queue){$("runtimeBadge").textContent=queue.running?"执行 "+queue.running+" · 排队 "+queue.waiting:"运行正常 · 空闲";$("runtimeBadge").classList.toggle("busy",!!queue.running);}
+  const queue=data.queue;if(queue){$("runtimeBadge").textContent=(queue.running?"执行 "+queue.running+" · 排队 "+queue.waiting:"运行正常 · 空闲")+(data.sessions?.resident?" · 会话 "+data.sessions.resident:"");$("runtimeBadge").classList.toggle("busy",!!queue.running);}
   const version=data.version||ctx.state?.version;if(version){$("versionBadge").textContent="v"+version;$("sidebarVersion").textContent="v"+version;}
 }
 async function showWorkspace(){

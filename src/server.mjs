@@ -2,6 +2,7 @@ import {Logger} from "./runtime/logger.mjs";
 import {Quotas} from "./services/quota.mjs";
 import {registerAdmin} from "./admin/routes.mjs";
 import {registerPages} from "./admin/pages.mjs";
+import {Sessions, sessionSelector, sessionOwner, registerSessions} from "./sessions.mjs";
 import { prepareChat, toolMessage } from "./chat.mjs";
 import { LoginManager } from "./login.mjs";
 import { createServer } from "node:http";
@@ -51,7 +52,7 @@ function promptInput(input) {
       "不接受 CLI 本地文件引用，请直接提交需要处理的文本",
       "unsupported_file_reference",
     );
-  return { prompt, model: modelId(input.model), account: input.account_id };
+  return { prompt, model: modelId(input.model), account: input.account_id, session_id: sessionSelector(input.session_id) };
 }
 export async function createApplication(options = {}) {
   const dataDir = resolve(options.dataDir || process.env.DATA_DIR || "data");
@@ -73,6 +74,9 @@ export async function createApplication(options = {}) {
     key: options.key || process.env.API_KEY,
     keyLookup: value=>store.authorizeKey(value),
   });
+  const sessions = new Sessions({runner, logger, limit: Number(process.env.SESSION_LIMIT || 2),
+    idleMs: Number(process.env.SESSION_IDLE_SECONDS || 120) * 1000,
+    maxTurns: Number(process.env.SESSION_MAX_TURNS || 50)});
   const loginManager = new LoginManager({
     dataDir,
     queue,
@@ -80,6 +84,7 @@ export async function createApplication(options = {}) {
     keyrings: runner.keyrings,
     logger,
     verify: (id, log) => verifyAccount(id, undefined, log),
+    beforeLogin: () => sessions.closeWhere(() => true),
   });
   const routes = [];
   function register(method, path, access, handler) {
@@ -95,20 +100,37 @@ export async function createApplication(options = {}) {
   };
   const quotas=new Quotas({store,runner,queue,logger});
   async function perform(params, signal, context={}) {
-    const selected=store.pick(params.account,params.model).id;
+    const existing = params.session_id && params.session_id !== "new" ? sessions.get(params.session_id, context.owner) : null;
+    if (existing && params.account && params.account !== existing.account)
+      throw new AppError(409, "会话已固定执行账号，请开始新会话", "session_mismatch");
+    if (existing && params.model && params.model !== existing.model)
+      throw new AppError(409, "会话已固定模型，请开始新会话", "session_mismatch");
+    const model = existing?.model ?? params.model;
+    const selected=store.pick(existing?.account || params.account,model).id;
     context.account_id=selected;context.account_name=store.get(selected).name;
     const queued=Date.now(),id=context.id||randomUUID();
     context.stage="queue";
     logger.info("request.queued",{request_id:id,account_id:selected,model:params.model||"默认模型",api_key_name:context.key_name||"管理台"});
     return queue.add(async()=>{
+      context.assertActive?.();
       if(context.key_id)store.assertKeyActive(context.key_id);
-      const a=store.pick(selected,params.model),started=Date.now();
+      const a=store.pick(selected,model),started=Date.now();
+      const turn = params.session_id ? sessions.begin(existing, context.owner, {
+        account: selected, model, kind: params.messages ? "chat" : "task", schema: params.schema,
+        effort: params.effort, config: params.sessionConfig, messages: params.messages, prompt: params.prompt,
+      }) : null;
       context.stage="generation";
       logger.info("request.started",{request_id:id,account_id:a.id,account_name:a.name,model:params.model||"默认模型",api_key_name:context.key_name||"管理台",queue_ms:started-queued});
-      a.requests++;await store.save();
+      a.requests++;
       try{
-        const result=await runner.execute(a.id,{prompt:params.prompt,model:params.model,schema:params.schema,effort:params.effort,signal});
+        await store.save();
+        context.assertActive?.();
+        if (turn?.session.closed) throw new AppError(410, "会话已关闭，请开始新会话", "session_closed");
+        if (context.key_id) store.assertKeyActive(context.key_id);
+        store.pick(selected, model);
+        const result=await runner.execute(a.id,{prompt:turn?.prompt ?? params.prompt,model,schema:params.schema,effort:params.effort,signal,sessionId:turn?.session.id});
         result.assistant=toolMessage(result,params.tooling);
+        if (turn) result.session = sessions.complete(turn.session, {messages: params.messages, assistant: result.assistant});
         a.successes++;a.total_tokens+=result.usage?.total_tokens||0;
         if(Number.isFinite(result.usage?.total_tokens))a.token_reports=(a.token_reports||0)+1;
         a.last_used=new Date().toISOString();a.last_error=null;
@@ -119,8 +141,12 @@ export async function createApplication(options = {}) {
         logger.info("request.completed",{request_id:id,account_id:a.id,model:params.model||result.model||"默认模型",status:200,duration_ms:Date.now()-started,tokens:result.usage?.total_tokens});
         return {...result,request_id:id,account:{id:a.id,name:a.name}};
       }catch(error){
+        if (turn && !turn.session.closed) await sessions.close(turn.session.id, context.owner);
         a.failures++;a.last_error=error.code||"internal_error";
-        if(["account_suspended","login_required"].includes(error.code)){a.enabled=false;a.status=error.code;}
+        if(["account_suspended","login_required"].includes(error.code)){
+          a.enabled=false;a.status=error.code;
+          await sessions.closeWhere(s => s.account === a.id);
+        }
         if(context.key_id){store.endKeyRequest(context.key_id,false);context.outcome=true;}
         await store.event({id,account_id:a.id,account_name:a.name,api_key_id:context.key_id||"panel",api_key_name:context.key_name||"管理台",
           model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",message:error instanceof AppError?error.message:"内部执行失败",stage:"generation",duration_ms:Date.now()-started});
@@ -134,7 +160,8 @@ export async function createApplication(options = {}) {
     send(res, { status: "ok", version }),
   );
   registerPages({register,publicDir});
-  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas});
+  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions});
+  registerSessions({register,send,sessions});
   register("POST", "/auth/login", "public", async ({ req, res }) => {
     auth.sameOrigin(req);
     const input = await body(req);
@@ -151,6 +178,7 @@ export async function createApplication(options = {}) {
     "mutation",
     async ({ req, res, principal }) => {
       if (loginManager.current?.owner === principal.token) loginManager.close();
+      await sessions.closeWhere(s => s.owner === sessionOwner(principal));
       auth.sessions.delete(principal.token);
       res.setHeader(
         "set-cookie",
@@ -173,8 +201,8 @@ export async function createApplication(options = {}) {
       settings:store.state.settings,
     });
   });
-  register("GET","/api/accounts","read",async({res})=>send(res,{accounts:store.list(),settings:store.state.settings,version,queue:queue.status}));
-  register("GET","/api/runtime","read",async({res})=>send(res,{version,queue:queue.status,memory:{gateway_rss:process.memoryUsage().rss,cli_rss:await runner.memory()}}));
+  register("GET","/api/accounts","read",async({res})=>send(res,{accounts:store.list(),settings:store.state.settings,version,queue:queue.status,sessions:sessions.status}));
+  register("GET","/api/runtime","read",async({res})=>send(res,{version,queue:queue.status,sessions:sessions.status,memory:{gateway_rss:process.memoryUsage().rss,cli_rss:await runner.memory()}}));
   register("POST", "/api/accounts", "mutation", async ({ req, res }) =>
     send(res, await store.create(await body(req)), 201),
   );
@@ -182,8 +210,11 @@ export async function createApplication(options = {}) {
     "PATCH",
     /^\/api\/accounts\/(a_[a-f0-9]{16})$/,
     "mutation",
-    async ({ req, res, match }) =>
-      send(res, await store.patch(match[1], await body(req))),
+    async ({ req, res, match }) => {
+      const account = await store.patch(match[1], await body(req));
+      if (!account.enabled) await sessions.closeWhere(s => s.account === account.id);
+      send(res, account);
+    },
   );
   register(
     "DELETE",
@@ -193,6 +224,7 @@ export async function createApplication(options = {}) {
       if (queue.activeKeys.has(match[1]))
         throw new AppError(409, "账号正在执行任务，请完成后移除");
       await store.remove(match[1]);
+      await sessions.closeWhere(s => s.account === match[1]);
       send(res, { success: true, profile_preserved: true });
     },
   );
@@ -233,6 +265,7 @@ export async function createApplication(options = {}) {
   );
   async function verifyAccount(id, signal, onOutput) {
     const a = store.get(id);
+    await sessions.closeWhere(s => s.account === id);
     let testStarted = null,
       testModel = "";
     try {
@@ -331,8 +364,8 @@ export async function createApplication(options = {}) {
       send(res, { account: { ...a }, note: "登录与实际生成均验证通过" });
     },
   );
-  register("POST", "/api/tasks", "mutation", async ({ req, res, signal }) =>
-    send(res, await perform(promptInput(await body(req)), signal)),
+  register("POST", "/api/tasks", "mutation", async ({ req, res, signal, principal, requestId }) =>
+    send(res, await perform(promptInput(await body(req)), signal, {id:requestId, owner:sessionOwner(principal), assertActive:()=>auth.session(req)})),
   );
   register("GET", "/v1/models", "api", async ({ res }) => {
     const models = new Set(
@@ -353,7 +386,7 @@ export async function createApplication(options = {}) {
     "/v1/chat/completions",
     "api",
     async ({ req, res, signal, principal, requestId }) => {
-      const context=req.trace={id:requestId,key_id:principal.key_id,key_name:principal.key_name,stage:"request_prepare",started:Date.now()};
+      const context=req.trace={id:requestId,key_id:principal.key_id,key_name:principal.key_name,owner:sessionOwner(principal),stage:"request_prepare",started:Date.now()};
       store.beginKeyRequest(principal.key_id);
       logger.info("request.received",{request_id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,stage:"request_prepare"});
       const input=await body(req);
@@ -389,6 +422,7 @@ export async function createApplication(options = {}) {
                   created,
                   model,
                   choices: [{ index: 0, delta, finish_reason }],
+                  ...(result.session ? {agy: {session: result.session}} : {}),
                 }) +
                 "\n\n",
             );
@@ -426,6 +460,7 @@ export async function createApplication(options = {}) {
               request_id: result.request_id,
               ignored_parameters: params.ignoredParameters,
               ...(params.tooling ? {tool_mode: "structured_output"} : {}),
+              ...(result.session ? {session: result.session} : {}),
             },
           });
       } finally {
@@ -514,6 +549,7 @@ export async function createApplication(options = {}) {
     auth,
     loginManager,
     quotas,
+    sessions,
     logger,
     catalog: routes.map(({ method, path, access }) => ({
       method,
@@ -534,12 +570,7 @@ if (
   const close = () => {
     app.loginManager.close();
     app.server.close();
-    for (const pid of app.runner.activePids) {
-      try {
-        process.kill(process.platform !== "win32" ? -pid : pid, "SIGKILL");
-      } catch {}
-    }
-    Promise.all([app.store.pending, app.runner.keyrings?.close()]).finally(() =>
+    Promise.all([app.store.pending, app.runner.close()]).finally(() =>
       process.exit(0),
     );
   };

@@ -6,6 +6,16 @@ import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AppError, accountId, classifyFailure, modelId } from "./common.mjs";
+import {CliConversation} from "./cli-conversation.mjs";
+
+function cliEnvironment(profile, work) {
+  const allowed = ["PATH", "Path", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE"];
+  const env = Object.fromEntries(allowed.filter(k => process.env[k]).map(k => [k, process.env[k]]));
+  env.HTTPS_PROXY ||= env.HTTP_PROXY;
+  return Object.assign(env, profile.env, {LANG: "C.UTF-8", NO_COLOR: "1", TERM: "dumb",
+    AGY_CLI_DISABLE_AUTO_UPDATE: "true", TMPDIR: work, TEMP: work, TMP: work});
+}
 export async function profilePaths(dataDir, id) {
   accountId(id);
   const home = join(dataDir, "accounts", id, "home");
@@ -52,44 +62,25 @@ export class Runner {
   }) {
     Object.assign(this, { dataDir, command, prefix, timeout, outputLimit });
     this.activePids = new Set();
+    this.sessions = new Map();
     this.keyrings =
       process.platform === "linux" && command === "agy" ? new Keyrings() : null;
   }
   async execute(
     id,
-    { prompt, model = "", probe = false, signal, onOutput, schema, effort, quota = false } = {},
+    { prompt, model = "", probe = false, signal, onOutput, schema, effort, quota = false, sessionId } = {},
   ) {
     modelId(model);
     if (effort != null && !["low", "medium", "high", "xhigh", "max"].includes(effort))
       throw new AppError(400, "reasoning_effort 无效", "unsupported_parameter");
+    if (sessionId) {
+      if (probe || quota) throw new AppError(400, "查询命令不能复用对话会话");
+      return this.executeSession(id, sessionId, {prompt, model, signal, onOutput, schema, effort});
+    }
     const profile = await profilePaths(this.dataDir, id);
     const work = join(this.dataDir, "work", randomUUID());
     await mkdir(work, { recursive: true, mode: 0o700 });
-    const allowed = [
-      "PATH",
-      "Path",
-      "SystemRoot",
-      "WINDIR",
-      "COMSPEC",
-      "PATHEXT",
-      "HTTP_PROXY",
-      "HTTPS_PROXY",
-      "ALL_PROXY",
-      "NO_PROXY",
-      "SSL_CERT_FILE",
-    ];
-    const env = Object.fromEntries(
-      allowed.filter((k) => process.env[k]).map((k) => [k, process.env[k]]),
-    );
-    env.HTTPS_PROXY ||= env.HTTP_PROXY;
-    Object.assign(env, profile.env, {
-      LANG: "C.UTF-8",
-      NO_COLOR: "1",
-      TERM: "dumb",
-      TMPDIR: work,
-      TEMP: work,
-      TMP: work,
-    });
+    const env = cliEnvironment(profile, work);
     const schemaPath = join(work, "response-schema.json");
     if (schema != null) {
       // ASVS V1.2.5: server-owned fixed path, no shell or user-provided CLI arguments.
@@ -271,6 +262,69 @@ export class Runner {
   }
   get activePid() {
     return this.activePids.values().next().value || null;
+  }
+  async executeSession(id, sessionId, options) {
+    accountId(id);
+    const signature = JSON.stringify({model: options.model, schema: options.schema, effort: options.effort});
+    let entry = this.sessions.get(sessionId);
+    if (!entry) {
+      entry = {account: id, signature};
+      this.sessions.set(sessionId, entry);
+      entry.ready = this.openSession(id, sessionId, options, entry).catch(error => {
+        if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+        throw error;
+      });
+    }
+    // Internal callers also cannot accidentally reuse a worker across identities/configs.
+    if (entry.account !== id || entry.signature !== signature)
+      throw new AppError(409, "会话账号、模型和生成配置不可更改", "session_mismatch");
+    const worker = await entry.ready;
+    const result = await worker.turn(options);
+    return {...result, model: options.model || result.model};
+  }
+  async openSession(id, sessionId, {model, schema, effort}, entry) {
+    const profile = await profilePaths(this.dataDir, id);
+    const work = join(this.dataDir, "work", randomUUID());
+    await mkdir(work, {recursive: true, mode: 0o700});
+    let keyring;
+    const cleanup = async pid => {
+      this.activePids.delete(pid);
+      this.onSessionClosed?.(sessionId);
+      try { await keyring?.release(); } finally {
+        try { await rm(work, {recursive: true, force: true}); } finally {
+          if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+        }
+      }
+    };
+    try {
+      const env = cliEnvironment(profile, work);
+      const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands"];
+      if (schema != null) {
+        const schemaPath = join(work, "response-schema.json");
+        await writeFile(schemaPath, JSON.stringify(schema), {mode: 0o600});
+        args.push("--json-schema", schemaPath);
+      }
+      if (effort != null) args.push("--effort", effort);
+      if (model) args.push("--model", model);
+      keyring = await this.keyrings?.acquire(id, profile);
+      Object.assign(env, keyring?.env);
+      return new CliConversation({command: this.command, args: [...this.prefix, ...args], cwd: work, env,
+        timeout: this.timeout, outputLimit: this.outputLimit,
+        onPid: pid => { if (pid) this.activePids.add(pid); }, onClose: cleanup});
+    } catch (error) { await cleanup(); throw error; }
+  }
+  async closeSession(sessionId) {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+    const worker = await entry.ready.catch(() => null);
+    await worker?.close();
+  }
+  async close() {
+    await Promise.all([...this.sessions.keys()].map(id => this.closeSession(id)));
+    for (const pid of this.activePids) {
+      try { if (process.platform !== "win32") process.kill(-pid, "SIGKILL"); else process.kill(pid, "SIGKILL"); } catch {}
+    }
+    await this.keyrings?.close();
   }
   async memory() {
     if (process.platform !== "linux" || !this.activePids.size) return null;

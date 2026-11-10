@@ -156,7 +156,8 @@ export function prepareChat(input, promptInput) {
       "Conversation:\n" + JSON.stringify(messages),
     ].join("\n");
   }
-  return {...promptInput({prompt, model: modelId(input.model), account_id: input.account_id}), schema, tooling, effort, ignoredParameters};
+  return {...promptInput({prompt, model: modelId(input.model), account_id: input.account_id, session_id: input.session_id}), schema, tooling, effort, ignoredParameters,
+    messages, sessionConfig: {tools: definitions, choice, named, parallel: input.parallel_tool_calls !== false}};
 }
 export function toolMessage(result, tooling) {
   if (!tooling) return {role: "assistant", content: result.response};

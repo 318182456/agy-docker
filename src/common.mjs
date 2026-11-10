@@ -36,6 +36,8 @@ export function modelId(value) {
   return value;
 }
 export function classifyFailure(text) {
+  if (/user location is not supported|unsupported (?:user )?(?:region|location)/i.test(text))
+    return new AppError(403, "当前运行环境的出口地区不受官方服务支持，请核对官方支持地区和网络配置", "unsupported_region");
   if (/violation of terms|TOS_VIOLATION|service has been disabled/i.test(text))
     return new AppError(
       403,

@@ -3,7 +3,7 @@ import {registerKeys} from "./keys.mjs";
 import {registerSettings} from "./settings.mjs";
 import {registerRecords,recordStats} from "./records.mjs";
 export function registerAdmin(ctx){
-  const {register,send,store,body,quotas,logger}=ctx;
+  const {register,send,store,body,quotas,logger,sessions}=ctx;
   registerKeys(ctx);registerSettings(ctx);registerRecords(ctx);
   register("GET",/^\/api\/accounts\/(a_[a-f0-9]{16})\/quota$/,"read",async({res,match})=>send(res,quotas.view(match[1])));
   register("POST",/^\/api\/accounts\/(a_[a-f0-9]{16})\/quota$/,"mutation",async({req,res,match})=>{
@@ -18,7 +18,9 @@ export function registerAdmin(ctx){
       if(input.enabled&&(!a.checked_at||!a.models.length||["login_required","account_suspended"].includes(a.status))){skipped.push({id:a.id,name:a.name,reason:"需先完成登录校验"});continue;}
       a.enabled=input.enabled;if(a.enabled)a.status="ready";updated++;
     }
-    await store.save();logger.info("accounts.bulk_updated",{count:updated});send(res,{updated,skipped});
+    await store.save();
+    await sessions?.closeWhere(s => accounts.some(a => a.id === s.account && !a.enabled));
+    logger.info("accounts.bulk_updated",{count:updated});send(res,{updated,skipped});
   });
   register("GET","/api/overview","read",async({res})=>{
     store.prune();const accounts=store.list(),records=store.state.events;

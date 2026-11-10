@@ -1,1 +1,39 @@
-<div class="split-layout"><section class="card"><h2>执行文本任务</h2><p class="muted">真实执行官方 CLI，结果和用量在下方显示。</p><form id="taskForm"><div class="form-grid"><label>执行账号<select id="taskAccount"><option value="">自动轮询</option></select></label><label>模型<select id="taskModel"><option value="">沿用 CLI 默认模型</option></select></label></div><label>任务内容<textarea id="prompt" rows="9" required placeholder="输入需要处理的文本任务"></textarea></label><div class="toolbar"><button id="sendTask">发送任务</button><button id="cancelTask" type="button" class="secondary" hidden>取消任务</button></div></form><p id="taskFeedback" class="feedback" role="status"></p></section><section class="card"><h2>执行结果</h2><div id="taskResult" class="result" hidden><p id="taskMeta" class="muted"></p><pre id="answer"></pre><button id="copyAnswer" class="secondary small">复制结果</button></div><p id="taskEmpty" class="empty">任务完成后在这里显示结果。</p></section></div>
+<div class="split-layout task-layout">
+  <section class="card task-compose">
+    <div class="section-heading"><div><h2>执行文本任务</h2><p class="muted">选择账号和模型，发送一次真实任务。</p></div><span class="badge">文本任务</span></div>
+    <form id="taskForm">
+      <label class="check-label task-mode"><input id="taskSessionMode" type="checkbox"/>连续对话（复用当前会话）</label>
+      <fieldset id="taskInputs">
+        <div class="form-grid">
+          <label>执行账号<select id="taskAccount"><option value="">自动轮询</option></select></label>
+          <label>模型<select id="taskModel"><option value="">沿用 CLI 默认模型</option></select></label>
+        </div>
+        <label for="prompt">任务内容</label>
+        <textarea id="prompt" rows="10" required placeholder="例如：用三句话介绍你能帮助我完成哪些任务。" aria-describedby="taskHint"></textarea>
+      </fieldset>
+      <div id="taskSessionBar" class="task-session-bar" hidden><span id="taskSessionInfo"></span><button id="endTaskSession" type="button" class="secondary small">开始新对话</button></div>
+      <p id="taskHint" class="muted task-hint">默认每次任务独立。开启连续对话后，后续任务会沿用当前上下文。等待期间请保持此页面打开。</p>
+      <div class="toolbar task-actions">
+        <button id="sendTask"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg><span id="sendTaskLabel">发送任务</span></button>
+        <button id="cancelTask" type="button" class="secondary" hidden>取消任务</button>
+        <span id="taskElapsed" class="task-elapsed" hidden aria-live="off"></span>
+      </div>
+    </form>
+    <p id="taskFeedback" class="feedback" role="status" aria-live="polite"></p>
+  </section>
+  <section id="taskOutput" class="card task-output" data-state="idle" aria-labelledby="taskOutputTitle">
+    <div class="section-heading task-output-heading"><div class="toolbar"><h2 id="taskOutputTitle">执行结果</h2><span id="taskStatus" class="badge">待提交</span></div><button id="copyAnswer" type="button" class="secondary small" disabled>复制结果</button></div>
+    <div id="taskEmpty" class="task-state">
+      <div class="task-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 6 6 6-6 6M13 18h6"/></svg></div>
+      <h3 id="taskStateTitle">结果将在这里显示</h3>
+      <p id="taskStateDetail">输入任务内容，发送后可在这里查看回答与用量。</p>
+      <span id="taskWaitingTime" class="task-waiting-time" hidden aria-live="off"></span>
+    </div>
+    <div id="taskResult" class="result task-result" hidden>
+      <dl id="taskMeta" class="task-meta"></dl>
+      <div class="task-answer-heading">回答内容</div>
+      <pre id="answer" tabindex="0" aria-label="任务回答"></pre>
+    </div>
+    <div id="taskRequest" class="task-request" hidden><span>请求 ID</span><code id="taskRequestId"></code><a href="/panel/records">查看请求记录</a></div>
+  </section>
+</div>
