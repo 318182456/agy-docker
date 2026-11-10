@@ -244,10 +244,14 @@ async function showLogin(a,resume=false){
       input.maxLength = 2048;
       const submit = text("button", "提交授权码");
       form.append(input, submit);
+      let submitting = false;
       form.onsubmit = async (e) => {
         e.preventDefault();
         const code = input.value.trim();
         input.value = "";
+        if (!code || submit.disabled) return;
+        let submissionError;
+        submitting = true;
         submit.disabled = true;
         try {
           await api("/api/accounts/" + a.id + "/login-input", {
@@ -256,8 +260,11 @@ async function showLogin(a,resume=false){
           });
           await poll();
         } catch (err) {
-          status.textContent = err.message;
-          submit.disabled = false;
+          submissionError = err.message;
+        } finally {
+          submitting = false;
+          await poll().catch(() => {});
+          if (submissionError) {status.textContent = submissionError;status.classList.add("error");}
         }
       };
       let pollTimer;
@@ -290,10 +297,25 @@ async function showLogin(a,resume=false){
           end.disabled = false;
         }
       };
+      const restart = text("button", "重新开始授权", "secondary");
+      restart.type = "button";
+      restart.hidden = true;
+      restart.onclick = async () => {
+        restart.disabled = true;input.value = "";
+        try {
+          await api("/api/accounts/" + a.id + "/login", {method:"POST", data:{restart:true}});
+          await showLogin(a,true);
+        } catch (error) {
+          status.textContent = error.message;
+          restart.disabled = false;
+        }
+      };
+      const recovery = text("div", "", "row-actions");
+      recovery.append(end, restart);
       end.onclick = () => finish(true);
       cancel.onclick = () => finish(false);
-      manual.append(controls, end);
-      cell.append(status, link, form, terminal, fullLog, manual, cancel);
+      manual.append(controls);
+      cell.append(status, link, form, recovery, terminal, fullLog, manual, cancel);
       const poll = async () => {
         clearTimeout(pollTimer);
         if (!active || loginPanels.get(a.id) !== cell) return;
@@ -309,16 +331,24 @@ async function showLogin(a,resume=false){
           if (follow) terminal.scrollTop = terminal.scrollHeight;
           link.hidden = !value.url;
           if (value.url) link.href = value.url;
-          form.hidden = !value.url && value.state !== "submitted";
-          end.disabled = value.state === "checking";
+          const busy = ["starting", "checking"].includes(value.state);
+          const canSubmit = value.can_submit_code === true;
+          form.hidden = !canSubmit;
+          input.disabled = submit.disabled = !canSubmit || submitting;
+          if (!canSubmit) input.value = "";
+          end.disabled = busy || value.state === "verified";
+          end.hidden = value.state === "verified";
+          end.textContent = value.verification_error ? "重试校验（实际调用）" : "校验登录（实际调用）";
+          restart.hidden = busy || value.state === "verified";
+          cancel.hidden = ["verified", "stopped", "idle"].includes(value.state);
           controls.hidden = !["running", "submitted"].includes(value.state);
-          if (["submitted", "checking", "verified"].includes(value.state)) {
-            submit.disabled = true;
-          }
-          if (value.state === "submitted")
-            status.textContent =
-              "授权码已提交，正在自动完成首次设置并校验实际调用，请稍候。";
-          if (value.state === "checking")
+          status.classList.toggle("error", !!value.verification_error);
+          if (value.verification_error) {
+            status.textContent = "校验未通过：" + value.verification_error.message +
+              (value.code_submitted ? "。授权码已提交，不能重复发送；可重试校验，或重新开始授权获取新码。" : "。可以提交授权码、重试校验或重新开始授权。");
+          } else if (value.state === "submitted")
+            status.textContent = "授权码已提交，正在自动完成首次设置并校验实际调用，请稍候。";
+          else if (value.state === "checking")
             status.textContent = "正在验证持久化登录与真实生成，请等待…";
           if (value.state === "verified") {
             status.textContent = "登录与实际调用已通过，可以启用账号。";
@@ -333,7 +363,7 @@ async function showLogin(a,resume=false){
             )
           )
             {pollTimer = setTimeout(poll, 1500);timers.add(pollTimer);}
-          else if (value.state !== "verified")
+          else if (value.state !== "verified" && !value.verification_error)
             status.textContent =
               "登录进程已结束；完整日志和退出状态保留在此处。";
         } catch (e) {

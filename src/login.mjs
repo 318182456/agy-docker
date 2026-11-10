@@ -43,6 +43,9 @@ export class LoginManager {
       return { state: "idle", text: "" };
     return {
       state: s.state,
+      code_submitted: s.submitted,
+      can_submit_code: s.state === "running" && !!s.child && !s.submitted && !!loginDisplay(s.raw).url,
+      verification_error: s.verificationError || null,
       text: loginDisplay(s.raw).text,
       screen: s.onboarding?.screen || "",
       setup: s.setup || "正在初始化官方 CLI…",
@@ -75,7 +78,7 @@ export class LoginManager {
       checkingPromise: null,
     });
     this.logger?.info("login.started",{account_id:id});
-    this.queue
+    s.work = this.queue
       .add(
         async () => {
           let timer, keyring;
@@ -87,6 +90,7 @@ export class LoginManager {
               throw new AppError(400, "登录工作目录不能是符号链接");
             if (!activeStates.has(s.state)) return;
             keyring = await this.keyrings?.acquire(id, p);
+            if (!activeStates.has(s.state)) return;
             const allowed = [
               "PATH",
               "HTTP_PROXY",
@@ -202,6 +206,7 @@ export class LoginManager {
     if (value.key && keys[value.key] && s.state !== "checking")
       s.child.stdin.write(keys[value.key]);
     else if (
+      s.state === "running" &&
       typeof value.code === "string" &&
       /^[A-Za-z0-9_./~+\-=]{4,2048}$/.test(value.code) &&
       !s.submitted &&
@@ -232,6 +237,10 @@ export class LoginManager {
         this.autoVerify(s);
         return;
       }
+      if (!s.submitted && !s.onboarding?.done.has("complete")) {
+        s.setup = "等待 Google 官方授权和首次设置完成…";
+        return;
+      }
       if (!s.submitted && loginDisplay(s.raw).url) {
         s.setup = "等待 Google 官方授权码…";
         return;
@@ -259,6 +268,7 @@ export class LoginManager {
       throw new AppError(409, "请先在当前会话发起登录");
     if (s.state === "checking") throw new AppError(409, "正在校验，请等待");
     s.state = "checking";
+    s.verificationError = null;
     this.append(
       s,
       "\n[网页] 正在验证已保存的登录状态；不会提前终止官方登录进程。\n",
@@ -276,11 +286,26 @@ export class LoginManager {
       this.kill(s);
       return value;
     } catch (error) {
+      s.verificationError = {code:error.code || "verification_failed",message:error.message};
       this.logger?.warn("login.verification_failed",{account_id:id,code:error.code||"verification_failed"});
       s.state = s.child ? (s.submitted ? "submitted" : "running") : "failed";
       this.append(s, "\n[校验失败] " + error.message + "\n");
       throw error;
     }
+  }
+  async restart(owner, id) {
+    accountId(id);
+    const s = this.current;
+    // ASVS V2.3/V3.5: restart only the owner's flow; never interrupt verification or replay a code.
+    if (s && (s.owner !== owner || s.id !== id))
+      throw new AppError(409, "请先结束当前登录，再重新发起授权");
+    if (s?.state === "checking") throw new AppError(409, "正在校验，请等待完成后再重新授权");
+    if (s) {
+      s.state = "stopped";
+      this.kill(s);
+      await s.work;
+    }
+    return this.start(owner, id);
   }
   kill(s) {
     clearTimeout(s.verifyTimer);

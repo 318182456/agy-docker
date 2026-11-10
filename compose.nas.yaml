@@ -2,7 +2,7 @@
 name: agy-docker
 services:
   app:
-    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.2.0}
+    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.2.1}
     extends:
       file: ../all/compose-presets.yml
       service: web-sso-bridge-model-api

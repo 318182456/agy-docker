@@ -200,8 +200,15 @@ export async function createApplication(options = {}) {
     "POST",
     /^\/api\/accounts\/(a_[a-f0-9]{16})\/login$/,
     "mutation",
-    async ({ res, match, principal }) =>
-      send(res, loginManager.start(principal.token, match[1])),
+    async ({ req, res, match, principal }) => {
+      const input = await body(req);
+      if (input.restart != null && typeof input.restart !== "boolean")
+        throw new AppError(400, "restart 必须为布尔值");
+      const value = input.restart === true
+        ? await loginManager.restart(principal.token, match[1])
+        : loginManager.start(principal.token, match[1]);
+      send(res, value);
+    },
   );
   register(
     "GET",

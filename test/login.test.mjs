@@ -209,3 +209,51 @@ test("finishing login verifies before stopping and keeps the exclusive barrier u
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("failed verification restores unsubmitted code input; consumed codes require a fresh owner-bound flow", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agy-restart-test-"));
+  const store = await new Store(dir).init(), account = await store.create({name:"retry"}), queue = new SerialQueue();
+  const children = [];
+  const manager = new LoginManager({dataDir:dir,store,queue,launch:()=>{
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();child.stderr = new PassThrough();child.stdin = new PassThrough();
+    children.push(child);return child;
+  }});
+  manager.kill = s => {clearTimeout(s.verifyTimer);if(s.child)queueMicrotask(()=>s.child?.emit("close",0));};
+  const waitChild = async n => {for(let i=0;i<100&&children.length<n;i++)await tick();assert.equal(children.length,n);};
+  try {
+    manager.start("owner",account.id);await waitChild(1);
+    let probes=0;manager.verify=async()=>{probes++;};
+    manager.autoVerify(manager.current);
+    await new Promise(r=>setTimeout(r,3100));
+    assert.equal(probes,0,"do not probe stale saved credentials before the new OAuth page is ready");
+    manager.verify=null;
+    children[0].stdout.write("https://accounts.google.com/o/oauth2/auth?state=synthetic-first\n");
+    assert.equal(manager.view("owner",account.id).can_submit_code,true);
+    let fail;
+    const verifying = manager.finish("owner",account.id,()=>new Promise((_,reject)=>{fail=reject;}));
+    await tick();
+    assert.equal(manager.view("owner",account.id).can_submit_code,false);
+    assert.throws(()=>manager.input("owner",account.id,{code:"synthetic-code"}));
+    await assert.rejects(manager.restart("owner",account.id),/正在校验/);
+    fail(Error("synthetic login not saved"));await assert.rejects(verifying);
+    const failed = manager.view("owner",account.id);
+    assert.equal(failed.can_submit_code,true);
+    assert.equal(failed.code_submitted,false);
+    assert.equal(failed.verification_error.message,"synthetic login not saved");
+    manager.input("owner",account.id,{code:"synthetic-code"});
+    await new Promise(r=>setTimeout(r,100));
+    await assert.rejects(manager.finish("owner",account.id,async()=>{throw Error("synthetic invalid grant");}));
+    const consumed = manager.view("owner",account.id);
+    assert.equal(consumed.can_submit_code,false);assert.equal(consumed.code_submitted,true);assert.equal(consumed.url,null);
+    await assert.rejects(manager.restart("other",account.id));
+    assert.throws(()=>manager.input("owner",account.id,{code:"synthetic-code"}));
+    await manager.restart("owner",account.id);await waitChild(2);
+    children[1].stdout.write("https://accounts.google.com/o/oauth2/auth?state=synthetic-second\n");
+    const fresh = manager.view("owner",account.id);
+    assert.equal(fresh.code_submitted,false);assert.equal(fresh.can_submit_code,true);assert.equal(fresh.verification_error,null);
+    assert.equal(fresh.text.includes("synthetic-first"),false);assert.equal(queue.running,1);
+    manager.stop("owner",account.id);await manager.current.work;assert.equal(queue.running,0);
+  } finally {manager.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -28,7 +28,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.2.0`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.2.1`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -104,7 +104,7 @@ NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-prese
 
 ## 镜像发布与开发
 
-GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.2.0` 对应镜像 `0.2.0`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
+GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.2.1` 对应镜像 `0.2.1`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。
 
 镜像首次发布后，GHCR包需设为Public才能匿名拉取（GitHub默认Private）；私有部署使用有read:packages权限的凭据登录GHCR。官方CLI归Google所有，本仓库不改变其条款或订阅限制。
 
@@ -131,3 +131,5 @@ NAS迁移或复制数据后，目录和文件需归属容器用户UID/GID 1000:1
 日志级别默认info，可在设置页修改；显式设置环境变量LOG_LEVEL时以部署环境为准。网页元数据保留由设置管理，Dockerstdout轮转由Compose的logging管理，两者独立。
 
 NAS模板保留共享SSO入口、代理和postgres-network，删除冗余hostname与CPU权重。`init`负责回收CLI子进程；`restart`控制异常重启；`env_file`加载配置；端口和bind目录提供访问与持久化；`read_only`配合/tmp临时目录以及cap_drop/security_opt提供加固；`mem_limit`防止内存失控；日志最多2个5MiB文件，防止长期运行占满磁盘。加固和资源限制不是所有Docker服务的必需项，但适合启动CLI子进程的本项目。
+
+登录校验失败时，当前行直接展示失败原因与恢复操作。未提交过授权码时恢复提交按钮；已提交的码不可重放，点击“重新开始授权”获取新码，或“重试校验”检查已保存状态。重新授权仅终止当前管理会话所属登录进程，等待清理后再创建新流程，正在实际校验时禁止重启。
